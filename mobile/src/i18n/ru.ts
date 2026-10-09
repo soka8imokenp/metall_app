@@ -350,6 +350,23 @@ export const ru = {
   upLatest: 'У вас последняя версия',
   upInstallHint: 'Если Android спросит разрешение на установку из этого приложения — разрешите',
   mb: 'МБ',
+
+  lkTitle: 'Введите код',
+  lkWrong: 'Неверный код',
+  lkLeft: 'Осталось попыток',
+  lkForgot: 'Забыли код? Выйти',
+  lkPin: 'Код-пароль',
+  lkBio: 'Отпечаток / Face ID',
+  lkBioPrompt: 'Вход в METALL ASIA',
+  lkSetTitle: 'Новый код',
+  lkSetHint: 'Придумайте код из 4 цифр',
+  lkRepeat: 'Повторите код',
+  lkMismatch: 'Коды не совпали — попробуйте ещё раз',
+  lkOn: 'Код установлен',
+  lkOff: 'Код отключён',
+  lkNoBio: 'На телефоне не настроен отпечаток или Face ID',
+  lkSecurity: 'Безопасность',
+  cancel2: 'Отмена',
 } as const;
 
 export type Dict = { [K in keyof typeof ru]: string };

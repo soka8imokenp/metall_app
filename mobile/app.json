@@ -55,6 +55,12 @@
         {
           "enforceContrast": false
         }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Face ID нужен, чтобы быстро открывать приложение"
+        }
       ]
     ],
     "experiments": {

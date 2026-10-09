@@ -6,6 +6,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { neu } from './components';
 import { LangToggle, ThemeToggle } from './LangToggle';
 import { useUpdates } from './UpdatePrompt';
+import { PinSetupSheet, useAppLock } from './AppLock';
+import { useToast } from './Toast';
 import { APP_VERSION } from '@/lib/updates';
 import { useRouter, useSegments } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -72,6 +74,9 @@ function Menu({ onNavigate }: { onNavigate: () => void }) {
   const { t, locale, setLocale, pick } = useI18n();
   const { colors, setMode } = useTheme();
   const updates = useUpdates();
+  const lock = useAppLock();
+  const toast = useToast();
+  const [pinOpen, setPinOpen] = React.useState(false);
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const segs = useSegments() as string[];
@@ -155,6 +160,39 @@ function Menu({ onNavigate }: { onNavigate: () => void }) {
           </View>
         </View>
 
+        {/* безопасность: код и отпечаток */}
+        <View style={[{ marginTop: 16, borderRadius: 20, backgroundColor: colors.card, paddingHorizontal: 16, paddingVertical: 6 }, neu(colors, 'raisedSm')]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <Feather name="lock" size={18} color={colors.textSecondary} />
+              <Text variant="body" style={{ fontWeight: '600' }}>{t('lkPin')}</Text>
+            </View>
+            <Switch
+              value={lock.pinSet}
+              onChange={async (on) => {
+                if (on) setPinOpen(true);
+                else { await lock.clearPin(); toast.show(t('lkOff'), 'info'); }
+              }}
+            />
+          </View>
+          <View style={{ height: 1, backgroundColor: colors.border }} />
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10, opacity: lock.pinSet && lock.bioAvailable ? 1 : 0.45 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <Feather name={lock.bioKind === 'face' ? 'scan-face' : 'fingerprint'} size={18} color={colors.textSecondary} />
+              <Text variant="body" style={{ fontWeight: '600' }}>{t('lkBio')}</Text>
+            </View>
+            <Switch
+              value={lock.bioEnabled}
+              onChange={async (on) => {
+                if (!lock.bioAvailable) { toast.show(t('lkNoBio'), 'error'); return; }
+                if (!lock.pinSet) { setPinOpen(true); return; }
+                await lock.setBio(on);
+              }}
+            />
+          </View>
+        </View>
+        <PinSetupSheet visible={pinOpen} onClose={() => setPinOpen(false)} onDone={() => { setPinOpen(false); toast.show(t('lkOn'), 'success'); }} />
+
         <Pressable
           onPress={() => void updates.check(true)}
           pressedStyle={neu(colors, 'insetSm')}
@@ -175,5 +213,20 @@ function Menu({ onNavigate }: { onNavigate: () => void }) {
         </Pressable>
       </ScrollView>
     </View>
+  );
+}
+
+/** Переключатель в стиле soft UI: вдавленная дорожка, выпуклый бегунок, красный — включено. */
+function Switch({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  const { colors } = useTheme();
+  const x = useSharedValue(value ? 1 : 0);
+  React.useEffect(() => {
+    x.value = withTiming(value ? 1 : 0, { duration: 260 });
+  }, [value, x]);
+  const thumb = useAnimatedStyle(() => ({ transform: [{ translateX: x.value * 22 }] }));
+  return (
+    <Pressable onPress={() => onChange(!value)} scaleTo={0.95} style={[{ width: 56, height: 32, borderRadius: 16, padding: 3, backgroundColor: value ? colors.brand : colors.card }, value ? null : neu(colors, 'insetSm')]}>
+      <Animated.View style={[{ width: 26, height: 26, borderRadius: 13, backgroundColor: '#fff' }, { boxShadow: '0px 2px 5px rgba(0,0,0,0.25)' } as any, thumb]} />
+    </Pressable>
   );
 }

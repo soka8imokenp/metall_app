@@ -15,6 +15,7 @@ import { AuthProvider, useAuth } from '@/auth/AuthProvider';
 import { ToastProvider } from '@/ui/Toast';
 import { DrawerShell } from '@/ui/Drawer';
 import { UpdateProvider } from '@/ui/UpdatePrompt';
+import { AppLockProvider } from '@/ui/AppLock';
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
 
 const queryClient = new QueryClient({
@@ -85,9 +86,11 @@ export default function Root() {
                   <WebFrame>
                     <ToastProvider>
                       <UpdateProvider>
-                        <DrawerShell>
-                          <Gate />
-                        </DrawerShell>
+                        <AppLockProvider>
+                          <DrawerShell>
+                            <Gate />
+                          </DrawerShell>
+                        </AppLockProvider>
                       </UpdateProvider>
                     </ToastProvider>
                   </WebFrame>

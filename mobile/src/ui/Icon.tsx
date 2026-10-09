@@ -3,7 +3,7 @@ import {
   ArrowDownLeft, ArrowRight, ArrowUpRight, Bell, Briefcase, Building2, Camera, CameraOff, Check, ChevronDown, ChevronLeft, ChevronRight,
   ChevronsRight, CircleAlert, CircleCheck, CirclePlus, CircleX, Clock, CornerUpLeft, CreditCard, DollarSign, Eye, EyeOff, File, FileText,
   House, Image as ImageIcon, Inbox, Info, Layers, LayoutGrid, LogOut, Moon, Package, PenLine, Play, Plus, QrCode, Repeat, ScanLine, Search, Send,
-  Download, Globe, RefreshCw, Settings, ShoppingBag, SquareCheck, Sun, Trash2, TrendingDown, TrendingUp, TriangleAlert, Truck, Wrench, WifiOff, X, Zap,
+  Delete, Download, Fingerprint, Globe, Lock, RefreshCw, ScanFace, Settings, ShoppingBag, SquareCheck, Sun, Trash2, TrendingDown, TrendingUp, TriangleAlert, Truck, Wrench, WifiOff, X, Zap,
   type LucideIcon,
 } from 'lucide-react-native';
 
@@ -34,6 +34,10 @@ const MAP = {
   'credit-card': CreditCard,
   'dollar-sign': DollarSign,
   download: Download,
+  delete: Delete,
+  fingerprint: Fingerprint,
+  lock: Lock,
+  'scan-face': ScanFace,
   'edit-3': PenLine,
   eye: Eye,
   'eye-off': EyeOff,
