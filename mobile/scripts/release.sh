@@ -42,16 +42,16 @@ echo "→ android-проект"
 EXPO_PUBLIC_API_URL="$API_URL" CI=1 npx expo prebuild --platform android --no-install >/dev/null
 # Сборка в контейнере с ограничением: на ПК 8 ГБ памяти.
 sed -i 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m/; s/^reactNativeArchitectures=.*/reactNativeArchitectures=arm64-v8a/; s/^org.gradle.parallel=true/org.gradle.parallel=false/' android/gradle.properties
-grep -q "kotlin.daemon.jvmargs" android/gradle.properties || printf '\nkotlin.daemon.jvmargs=-Xmx1g\norg.gradle.workers.max=2\nkotlin.compiler.execution.strategy=in-process\n' >> android/gradle.properties
+grep -q "kotlin.daemon.jvmargs" android/gradle.properties || printf '\nkotlin.daemon.jvmargs=-Xmx1g\norg.gradle.workers.max=3\nkotlin.compiler.execution.strategy=in-process\n' >> android/gradle.properties
 
 echo "→ сборка APK (несколько минут)"
 docker build -q -t metall-apk-builder scripts/android-build >/dev/null
 U="$(id -u):$(id -g)"
-nice -n 15 docker run --rm --cpuset-cpus 0-2 --memory 4g --memory-swap 4g \
+nice -n 15 docker run --rm --cpuset-cpus 0-5 --memory 4g --memory-swap 4g \
   -v "$HERE":/app -v metall-gradle-cache:/root/.gradle \
-  -e EXPO_PUBLIC_API_URL="$API_URL" -e NODE_ENV=production -e CMAKE_BUILD_PARALLEL_LEVEL=2 \
+  -e EXPO_PUBLIC_API_URL="$API_URL" -e NODE_ENV=production -e CMAKE_BUILD_PARALLEL_LEVEL=4 \
   -w /app/android metall-apk-builder \
-  bash -c "./gradlew assembleRelease --no-daemon --max-workers=2 -x lint -x test -q; rc=\$?; chown -R $U /app/android; exit \$rc"
+  bash -c "./gradlew assembleRelease --no-daemon --max-workers=3 -x lint -x test -q; rc=\$?; chown -R $U /app/android; exit \$rc"
 
 mkdir -p "$(dirname "$OUT")"
 cp android/app/build/outputs/apk/release/app-release.apk "$OUT"
