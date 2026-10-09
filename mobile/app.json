@@ -1,0 +1,70 @@
+{
+  "expo": {
+    "name": "METALL ASIA",
+    "slug": "metall-asia",
+    "scheme": "metallasia",
+    "version": "0.8.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "uz.metallasia.app"
+    },
+    "android": {
+      "package": "uz.metallasia.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#09090b",
+        "foregroundImage": "./assets/android-icon-foreground.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.REQUEST_INSTALL_PACKAGES"
+      ],
+      "versionCode": 800
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-localization",
+      "expo-image",
+      "expo-font",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Камера нужна для сканирования кодов и фото чеков"
+        }
+      ],
+      "expo-build-properties",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          },
+          "ios": {}
+        }
+      ],
+      [
+        "expo-navigation-bar",
+        {
+          "enforceContrast": false
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": false
+    },
+    "extra": {
+      "updates": {
+        "githubRepo": "",
+        "apkAsset": "MetallAsia"
+      }
+    }
+  }
+}

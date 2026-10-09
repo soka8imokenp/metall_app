@@ -1,0 +1,9 @@
+node_modules/
+.expo/
+dist/
+web-build/
+*.log
+.env
+# Нативные проекты генерирует expo prebuild (CNG), руками их не правят.
+android/
+ios/

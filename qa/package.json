@@ -1,0 +1,27 @@
+{
+  "name": "metall-asia-qa",
+  "private": true,
+  "type": "module",
+  "description": "Прогоны интерфейса: скриншоты, переполнение, ошибки консоли. Не часть поставки.",
+  "scripts": {
+    "admin-live": "node admin-live/run.mjs",
+    "dashboard-live": "node dashboard-live/run.mjs",
+    "exchange-live": "node exchange-live/run.mjs",
+    "finance-live": "node finance-live/run.mjs",
+    "finance-reports": "node finance-reports/run.mjs",
+    "help-live": "node help-live/run.mjs",
+    "login-live": "node login-live/run.mjs",
+    "production-live": "node production-live/run.mjs",
+    "roles-live": "node roles-live/run.mjs",
+    "sales-live": "node sales-live/run.mjs",
+    "sidebar-brand": "node sidebar-brand/run.mjs",
+    "stand-smoke": "node stand-smoke/run.mjs",
+    "warehouse-live": "node warehouse-live/run.mjs",
+    "web-uz": "node web-uz/run.mjs"
+  },
+  "devDependencies": {
+    "express": "^5.1.0",
+    "pg": "^8.23.0",
+    "playwright-core": "^1.56.0"
+  }
+}

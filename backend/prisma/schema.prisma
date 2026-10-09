@@ -1,0 +1,2727 @@
+// Модель данных METALL ASIA. Соответствует docs/03-DATA-MODEL.md.
+//
+// Соглашения (оттуда же):
+//   - первичный ключ    — bigint identity, наружу не отдаётся;
+//   - ключ для API      — uid (uuid v7), только он попадает в ответы;
+//   - количества        — Decimal(20,6), деньги — Decimal(20,4), проценты — Decimal(9,4);
+//     double precision в учётных полях запрещён;
+//   - двуязычие         — отдельные поля nameRu / nameUz, не JSON: по ним идут
+//     поиск, сортировка и индексы;
+//   - время             — timestamptz, хранение в UTC, показ в Asia/Tashkent;
+//   - операционные таблицы несут companyId и закрываются политиками RLS —
+//     политики и ограничения-инварианты живут в SQL миграции, схема их не описывает.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// 1. Доступ и организация
+// ---------------------------------------------------------------------------
+
+model Company {
+  id            BigInt        @id @default(autoincrement())
+  uid           String        @unique @default(uuid(7)) @db.Uuid
+  code          String        @unique
+  nameRu        String        @map("name_ru")
+  nameUz        String        @map("name_uz")
+  inn           String
+  legalAddress  String?       @map("legal_address")
+  bankDetails   Json?         @map("bank_details")
+  baseCurrency  String        @default("UZS") @map("base_currency")
+  /// Метод списания (ТЗ 5.7). Задевает себестоимость расхода и маржу заказа.
+  costingMethod CostingMethod @default(fifo) @map("costing_method")
+  /// Что делать со строкой заказа дешевле себестоимости (ТЗ 9.2): `block` —
+  /// сервер отказывает всем, `approve` — пропускает того, кому выдано право
+  /// `sales.below_cost`. Умолчание `block`: пока правило не выбрано осознанно,
+  /// система не должна тихо отдавать товар в убыток.
+  belowCostMode BelowCostMode @default(block) @map("below_cost_mode")
+  /// Рабочая неделя завода в ISO-днях (1 — понедельник, 7 — воскресенье).
+  /// По ней считаются сроки и доступные минуты участков (ТЗ 4.1, Э7).
+  workDays      Int[]         @default([1, 2, 3, 4, 5, 6]) @map("work_days")
+  /// Порог «крупного платежа» в базовой валюте компании (требование заказчика
+  /// со встречи 07.10). Операцию дороже порога не утвердить правом
+  /// `finance.approve` — нужно `finance.approve.large`. `NULL` — порога нет.
+  ///
+  /// Сравнение идёт по `amount_base`, то есть по сумме, пересчитанной курсом
+  /// дня операции. Иначе порог обходился бы валютой: «1000» в долларах и в
+  /// сумах — разные деньги, а поле `amount` у них одно.
+  approvalLimitSingle Decimal? @map("approval_limit_single") @db.Decimal(20, 4)
+  /// Предел на одного получателя за окно, в базовой валюте. Порога по одной
+  /// операции мало: в примере заказчика крали именно мелкими платежами, каждый
+  /// из которых ниже любого порога. `NULL` — предела нет.
+  approvalLimitPeriod Decimal? @map("approval_limit_period") @db.Decimal(20, 4)
+  /// Длина окна предела в днях: 1 — день, 30 — месяц. Дни, а не «месяц» словом:
+  /// календарный месяц обнуляет счёт первого числа, и платежи, разложенные на
+  /// конец одного месяца и начало другого, прошли бы мимо предела.
+  approvalPeriodDays  Int      @default(30) @map("approval_period_days")
+  isActive      Boolean       @default(true) @map("is_active")
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  departments       Department[]
+  roles             Role[]
+  roleAssignments   UserRoleAssignment[]
+  auditLog          AuditLog[]
+  itemGroups        ItemGroup[]
+  items             Item[]
+  partners          Partner[]
+  warehouses        Warehouse[]
+  batches           Batch[]
+  serials           SerialNumber[]
+  stockReasons      StockReason[]
+  productionShifts  ProductionShift[]
+  calendarDays      ProductionCalendarDay[]
+  stockMoves        StockMove[]
+  stockBalances     StockBalance[]
+  stockLevels       ItemStockLevel[]
+  reservations      StockReservation[]
+  inventorySheets   InventorySheet[]
+  labelTemplates    LabelTemplate[]
+  dealLostReasons   DealLostReason[]
+  leadSourceRules   LeadSourceRule[]
+  siteKeys          SiteKey[]
+  crmTasks          CrmTask[]
+  crmActivities     CrmActivity[]
+  crmTaskTypes      CrmTaskType[]
+  workCenters       WorkCenter[]
+  techCards         TechCard[]
+  productionOrders  ProductionOrder[]
+  deviations        DeviationLog[]
+  priceTypes        PriceType[]
+  priceLists        PriceList[]
+  partnerPrices     PartnerPrice[]
+  salesOrders       SalesOrder[]
+  shipments         Shipment[]
+  accounts          Account[]
+  cashflowItems     CashflowItem[]
+  financeOps        FinanceOperation[]
+  financeEntries    FinanceEntry[]
+  budgets           Budget[]
+  leadSources       LeadSource[]
+  leads             Lead[]
+  dealStages        DealStage[]
+  deals             Deal[]
+  documentTypes     DocumentType[]
+  documents         Document[]
+  documentLines     DocumentLine[]
+  documentVersions  DocumentVersion[]
+  documentTemplates DocumentTemplate[]
+  counters          DocumentCounter[]
+  outbox            OutboxEvent[]
+  idempotencyKeys   IdempotencyKey[]
+  externalSystems   ExternalSystem[]
+  webhookSubs       WebhookSubscription[]
+  exchangeMessages  ExchangeMessage[]
+  externalRefs      ExternalRef[]
+
+  attachments Attachment[]
+
+  @@map("company")
+}
+
+model Department {
+  id        BigInt  @id @default(autoincrement())
+  uid       String  @unique @default(uuid(7)) @db.Uuid
+  companyId BigInt  @map("company_id")
+  parentId  BigInt? @map("parent_id")
+  nameRu    String  @map("name_ru")
+  nameUz    String  @map("name_uz")
+  isActive  Boolean @default(true) @map("is_active")
+
+  company     Company              @relation(fields: [companyId], references: [id])
+  parent      Department?          @relation("DepartmentTree", fields: [parentId], references: [id])
+  children    Department[]         @relation("DepartmentTree")
+  assignments UserRoleAssignment[]
+  budgets     Budget[]
+
+  @@index([companyId])
+  @@map("department")
+}
+
+model UserAccount {
+  id                BigInt    @id @default(autoincrement())
+  uid               String    @unique @default(uuid(7)) @db.Uuid
+  login             String    @unique
+  email             String?
+  phone             String?
+  passwordHash      String    @map("password_hash")
+  fullName          String    @map("full_name")
+  locale            Locale    @default(ru)
+  isActive          Boolean   @default(true) @map("is_active")
+  lastLoginAt       DateTime? @map("last_login_at") @db.Timestamptz(6)
+  telegramUserId    BigInt?   @unique @map("telegram_user_id")
+  telegramLinkedAt  DateTime? @map("telegram_linked_at") @db.Timestamptz(6)
+  telegramBlocked   Boolean   @default(false) @map("telegram_blocked")
+  telegramBlockedAt DateTime? @map("telegram_blocked_at") @db.Timestamptz(6)
+  failedLoginCount  Int       @default(0) @map("failed_login_count")
+  lockedUntil       DateTime? @map("locked_until") @db.Timestamptz(6)
+  // Пароль выдан не самим человеком: так заводят учётку и так её сбрасывает
+  // руководитель. Пока признак стоит, вход проходит, но дальше смены пароля и
+  // чтения своего профиля не пускает (требование Отабека от 06.10).
+  mustChangePassword Boolean  @default(false) @map("must_change_password")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  roleAssignments      UserRoleAssignment[]
+  auditLog             AuditLog[]
+  calendarDays         ProductionCalendarDay[]
+  loginLog             LoginLog[]
+  telegramCodes        TelegramLinkCode[]      @relation("TelegramCodeUser")
+  telegramCodesMade    TelegramLinkCode[]      @relation("TelegramCodeAuthor")
+  telegramSessions     TelegramSession[]       @relation("TelegramSessionUser")
+  notificationSettings NotificationSetting[]   @relation("NotificationSettingUser")
+  notificationOutbox   NotificationOutbox[]    @relation("NotificationOutboxUser")
+  devices              Device[]                @relation("DeviceUser")
+  devicesRevoked       Device[]                @relation("DeviceRevoker")
+  sessions             AuthSession[]           @relation("SessionUser")
+  sessionsRevoked      AuthSession[]           @relation("SessionRevoker")
+  appSettings          AppSetting[]            @relation("AppSettingAuthor")
+  dealEvents           DealStageEvent[]        @relation("DealEventUser")
+  managedPartners      Partner[]               @relation("PartnerManager")
+  salesOrders          SalesOrder[]            @relation("SalesOrderManager")
+  productionOrders     ProductionOrder[]       @relation("ProductionResponsible")
+  deals                Deal[]                  @relation("DealManager")
+  leads                Lead[]                  @relation("LeadManager")
+  inventorySheets      InventorySheet[]        @relation("InventoryAuthor")
+  inventoryApproved    InventorySheet[]        @relation("InventoryApprover")
+  inventoryCounted     InventorySheetLine[]    @relation("InventoryCounter")
+  crmTasks             CrmTask[]               @relation("CrmTaskAssignee")
+  crmTasksCreated      CrmTask[]               @relation("CrmTaskAuthor")
+  crmActivities        CrmActivity[]           @relation("CrmActivityUser")
+  resetRequests        PasswordResetRequest[]  @relation("ResetRequestUser")
+  resetRequestsDone    PasswordResetRequest[]  @relation("ResetRequestHandler")
+  dbBackups            DbBackup[]              @relation("DbBackupStarter")
+
+  @@map("user_account")
+}
+
+model Role {
+  id        BigInt  @id @default(autoincrement())
+  companyId BigInt? @map("company_id")
+  code      String
+  nameRu    String  @map("name_ru")
+  nameUz    String  @map("name_uz")
+  isSystem  Boolean @default(false) @map("is_system")
+
+  company     Company?             @relation(fields: [companyId], references: [id])
+  permissions RolePermission[]
+  assignments UserRoleAssignment[]
+
+  @@unique([companyId, code])
+  @@map("role")
+}
+
+model Permission {
+  id            BigInt @id @default(autoincrement())
+  code          String @unique
+  module        String
+  descriptionRu String @map("description_ru")
+  descriptionUz String @map("description_uz")
+
+  roles RolePermission[]
+
+  @@map("permission")
+}
+
+model RolePermission {
+  roleId       BigInt @map("role_id")
+  permissionId BigInt @map("permission_id")
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permission")
+}
+
+/**
+ * Одноразовый код привязки Telegram.
+ * Хранится хешем: код — пароль на один раз, и в базе его быть не должно.
+ * Жизнь — минуты; использованный и отозванный остаются строками, чтобы было
+ * видно, кто выдавал и чем кончилось.
+ */
+model TelegramLinkCode {
+  id        BigInt    @id @default(autoincrement())
+  userId    BigInt    @map("user_id")
+  codeHash  String    @unique @map("code_hash")
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdBy BigInt?   @map("created_by")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user   UserAccount  @relation("TelegramCodeUser", fields: [userId], references: [id], onDelete: Cascade)
+  author UserAccount? @relation("TelegramCodeAuthor", fields: [createdBy], references: [id])
+
+  @@index([userId, createdAt])
+  @@map("telegram_link_code")
+}
+
+/**
+ * Разговор человека с ботом: язык, шаг и кто это, если уже вошёл.
+ * Лежит в базе, а не в памяти процесса: перезапуск бота не должен спрашивать
+ * язык и пароль заново. Пароля здесь нет и быть не может — он проверяется и
+ * забывается там же, где прочитан.
+ */
+/**
+ * Что человек хочет получать от бота (ТЗ 11.1). Нет строки — получает всё.
+ */
+model NotificationSetting {
+  id        BigInt   @id @default(autoincrement())
+  userId    BigInt   @map("user_id")
+  kind      String
+  enabled   Boolean  @default(true)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  user UserAccount @relation("NotificationSettingUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, kind])
+  @@map("notification_setting")
+}
+
+/**
+ * Очередь уведомлений: что собрано, что отправлено, что не дошло и почему.
+ * Она же защита от повтора — ключ `dedupe_key` хранит предмет и дату события.
+ */
+model NotificationOutbox {
+  id        BigInt    @id @default(autoincrement())
+  userId    BigInt    @map("user_id")
+  kind      String
+  dedupeKey String    @map("dedupe_key")
+  textRu    String    @map("text_ru")
+  textUz    String    @map("text_uz")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  sentAt    DateTime? @map("sent_at") @db.Timestamptz(6)
+  attempts  Int       @default(0)
+  lastError String?   @map("last_error")
+  // Push отмечается отдельно от Telegram: одно уведомление уходит в оба канала.
+  pushSentAt   DateTime? @map("push_sent_at") @db.Timestamptz(6)
+  pushAttempts Int       @default(0) @map("push_attempts")
+  pushError    String?   @map("push_error")
+
+  user UserAccount @relation("NotificationOutboxUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, kind, dedupeKey])
+  @@map("notification_outbox")
+}
+
+model TelegramSession {
+  id             BigInt   @id @default(autoincrement())
+  chatId         BigInt   @unique @map("chat_id")
+  telegramUserId BigInt   @map("telegram_user_id")
+  userId         BigInt?  @map("user_id")
+  locale         String   @default("ru")
+  step           String   @default("language")
+  pendingLogin   String?  @map("pending_login")
+  /**
+   * Незаконченный мастер: шаг и уже введённые поля. Пусто — разговора нет.
+   */
+  flow           Json?
+  lastSeenAt     DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user UserAccount? @relation("TelegramSessionUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@map("telegram_session")
+}
+
+model UserRoleAssignment {
+  id           BigInt    @id @default(autoincrement())
+  userId       BigInt    @map("user_id")
+  roleId       BigInt    @map("role_id")
+  companyId    BigInt    @map("company_id")
+  departmentId BigInt?   @map("department_id")
+  warehouseId  BigInt?   @map("warehouse_id")
+  scope        RoleScope @default(all)
+  validFrom    DateTime? @map("valid_from") @db.Timestamptz(6)
+  validTo      DateTime? @map("valid_to") @db.Timestamptz(6)
+
+  user       UserAccount @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role       Role        @relation(fields: [roleId], references: [id])
+  company    Company     @relation(fields: [companyId], references: [id])
+  department Department? @relation(fields: [departmentId], references: [id])
+  warehouse  Warehouse?  @relation(fields: [warehouseId], references: [id])
+
+  @@unique([userId, roleId, companyId])
+  @@index([companyId])
+  @@map("user_role_assignment")
+}
+
+model AuditLog {
+  id         BigInt      @id @default(autoincrement())
+  companyId  BigInt      @map("company_id")
+  userId     BigInt?     @map("user_id")
+  occurredAt DateTime    @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  source     AuditSource @default(web)
+  entityType String      @map("entity_type")
+  entityId   String      @map("entity_id")
+  action     String
+  changes    Json?
+  ip         String?
+  requestId  String?     @map("request_id")
+
+  company Company      @relation(fields: [companyId], references: [id])
+  user    UserAccount? @relation(fields: [userId], references: [id])
+
+  @@index([companyId, occurredAt(sort: Desc)])
+  @@index([entityType, entityId])
+  @@map("audit_log")
+}
+
+/// Установка мобильного приложения на телефоне. Миграция `mobile_sessions_devices`.
+model Device {
+  id             BigInt    @id @default(autoincrement())
+  uid            String    @unique @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         BigInt    @map("user_id")
+  installationId String    @map("installation_id")
+  platform       String
+  model          String?
+  osVersion      String?   @map("os_version")
+  appVersion     String?   @map("app_version")
+  pushToken      String?   @map("push_token")
+  pushProvider   String?   @map("push_provider")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastSeenAt     DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  revokedAt      DateTime? @map("revoked_at") @db.Timestamptz(6)
+  revokedBy      BigInt?   @map("revoked_by")
+
+  user     UserAccount   @relation("DeviceUser", fields: [userId], references: [id], onDelete: Cascade)
+  revoker  UserAccount?  @relation("DeviceRevoker", fields: [revokedBy], references: [id])
+  sessions AuthSession[]
+
+  @@unique([userId, installationId], map: "device_user_installation_key")
+  @@map("device")
+}
+
+/// Сессия входа: веб или телефон. У телефона — refresh-токен (в базе только хеш).
+model AuthSession {
+  id           BigInt    @id @default(autoincrement())
+  uid          String    @unique @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       BigInt    @map("user_id")
+  client       String
+  deviceId     BigInt?   @map("device_id")
+  refreshHash  String?   @unique @map("refresh_hash")
+  ip           String?
+  userAgent    String?   @map("user_agent")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastUsedAt   DateTime  @default(now()) @map("last_used_at") @db.Timestamptz(6)
+  expiresAt    DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt    DateTime? @map("revoked_at") @db.Timestamptz(6)
+  revokedBy    BigInt?   @map("revoked_by")
+  revokeReason String?   @map("revoke_reason")
+
+  user    UserAccount  @relation("SessionUser", fields: [userId], references: [id], onDelete: Cascade)
+  revoker UserAccount? @relation("SessionRevoker", fields: [revokedBy], references: [id])
+  device  Device?      @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  @@map("auth_session")
+}
+
+/// Настройки, которые меняет администратор, а не выкатка (ключ → JSON).
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updatedBy BigInt?  @map("updated_by")
+
+  author UserAccount? @relation("AppSettingAuthor", fields: [updatedBy], references: [id])
+
+  @@map("app_setting")
+}
+
+model LoginLog {
+  id            BigInt   @id @default(autoincrement())
+  userId        BigInt?  @map("user_id")
+  occurredAt    DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  success       Boolean
+  ip            String?
+  userAgent     String?  @map("user_agent")
+  failureReason String?  @map("failure_reason")
+
+  user UserAccount? @relation(fields: [userId], references: [id])
+
+  @@index([userId, occurredAt(sort: Desc)])
+  @@map("login_log")
+}
+
+// ---------------------------------------------------------------------------
+// 2. Справочники
+// ---------------------------------------------------------------------------
+
+model Currency {
+  id        BigInt  @id @default(autoincrement())
+  code      String  @unique
+  symbol    String
+  precision Int     @default(2)
+  nameRu    String  @default("") @map("name_ru")
+  nameUz    String  @default("") @map("name_uz")
+  /// Загружать курс с ЦБ РУз самостоятельно (ТЗ 6.2). У учётной валюты
+  /// компании курса нет, поэтому у неё выключено.
+  autoload  Boolean @default(true)
+
+  rates         CurrencyRate[]
+  priceLists    PriceList[]
+  partnerPrices PartnerPrice[]
+  accounts      Account[]
+  salesOrders   SalesOrder[]
+  financeOps    FinanceOperation[]
+  deals         Deal[]
+  documents     Document[]
+
+  @@map("currency")
+}
+
+model CurrencyRate {
+  id         BigInt   @id @default(autoincrement())
+  currencyId BigInt   @map("currency_id")
+  rateDate   DateTime @map("rate_date") @db.Date
+  rate       Decimal  @db.Decimal(20, 8)
+  /// Откуда курс: `cbu.uz` — загружен с сайта банка, `manual` — введён
+  /// руками, `demo` — посев. Загрузка не затирает введённое руками.
+  source     String?
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  currency Currency @relation(fields: [currencyId], references: [id])
+
+  @@unique([currencyId, rateDate])
+  @@map("currency_rate")
+}
+
+model Unit {
+  id     BigInt   @id @default(autoincrement())
+  code   String   @unique
+  nameRu String   @map("name_ru")
+  nameUz String   @map("name_uz")
+  kind   UnitKind
+
+  items               Item[]
+  itemUnits           ItemUnit[]
+  stockMoves          StockMove[]
+  salesOrderLines     SalesOrderLine[]
+  techCards           TechCard[]
+  techCardMaterials   TechCardMaterial[]
+  productionOrders    ProductionOrder[]
+  productionMaterials ProductionMaterial[]
+
+  @@map("unit")
+}
+
+model ItemGroup {
+  id        BigInt  @id @default(autoincrement())
+  companyId BigInt  @map("company_id")
+  parentId  BigInt? @map("parent_id")
+  nameRu    String  @map("name_ru")
+  nameUz    String  @map("name_uz")
+
+  company  Company     @relation(fields: [companyId], references: [id])
+  parent   ItemGroup?  @relation("ItemGroupTree", fields: [parentId], references: [id])
+  children ItemGroup[] @relation("ItemGroupTree")
+  items    Item[]
+
+  @@index([companyId])
+  @@map("item_group")
+}
+
+model Item {
+  id           BigInt    @id @default(autoincrement())
+  uid          String    @unique @default(uuid(7)) @db.Uuid
+  companyId    BigInt    @map("company_id")
+  code         String
+  nameRu       String    @map("name_ru")
+  nameUz       String    @map("name_uz")
+  itemType     ItemType  @map("item_type")
+  groupId      BigInt?   @map("group_id")
+  baseUnitId   BigInt    @map("base_unit_id")
+  vatRate      Decimal   @default(12) @map("vat_rate") @db.Decimal(9, 4)
+  trackBatches Boolean   @default(false) @map("track_batches")
+  trackSerials Boolean   @default(false) @map("track_serials")
+  isWeighted   Boolean   @default(false) @map("is_weighted")
+  minQty       Decimal   @default(0) @map("min_qty") @db.Decimal(20, 6)
+  criticalQty  Decimal   @default(0) @map("critical_qty") @db.Decimal(20, 6)
+  barcode      String?
+  isActive     Boolean   @default(true) @map("is_active")
+  archivedAt   DateTime? @map("archived_at") @db.Timestamptz(6)
+  version      Int       @default(1)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company             Company              @relation(fields: [companyId], references: [id])
+  group               ItemGroup?           @relation(fields: [groupId], references: [id])
+  baseUnit            Unit                 @relation(fields: [baseUnitId], references: [id])
+  attributes          ItemAttribute?
+  units               ItemUnit[]
+  batches             Batch[]
+  serials             SerialNumber[]
+  moves               StockMove[]
+  balances            StockBalance[]
+  stockLevels         ItemStockLevel[]
+  reservations        StockReservation[]
+  inventoryLines      InventorySheetLine[]
+  priceLists          PriceList[]
+  partnerPrices       PartnerPrice[]
+  salesOrderLines     SalesOrderLine[]
+  documentLines       DocumentLine[]
+  shipmentLines       ShipmentLine[]
+  techCards           TechCard[]
+  techCardMaterials   TechCardMaterial[]
+  productionOrders    ProductionOrder[]
+  productionMaterials ProductionMaterial[]
+  productionOutputs   ProductionOutput[]
+
+  @@unique([companyId, code])
+  @@index([companyId, barcode])
+  @@index([companyId, nameRu])
+  @@map("item")
+}
+
+/// Минимальный и критический уровень на складе (ТЗ 5.10).
+///
+/// Уровень на компанию живёт в самой позиции (`minQty`, `criticalQty`), а эта
+/// таблица его перекрывает по складу. Именно перекрывает, а не дополняет: есть
+/// у позиции хоть одна строка уровня — компанийский уровень по ней в
+/// потребности не участвует, иначе одна нехватка попала бы в отчёт дважды.
+model ItemStockLevel {
+  id          BigInt   @id @default(autoincrement())
+  uid         String   @unique @default(uuid(7)) @db.Uuid
+  companyId   BigInt   @map("company_id")
+  itemId      BigInt   @map("item_id")
+  warehouseId BigInt   @map("warehouse_id")
+  minQty      Decimal  @default(0) @map("min_qty") @db.Decimal(20, 6)
+  criticalQty Decimal  @default(0) @map("critical_qty") @db.Decimal(20, 6)
+  comment     String?
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  company   Company   @relation(fields: [companyId], references: [id])
+  item      Item      @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, itemId, warehouseId])
+  @@index([companyId, warehouseId])
+  @@map("item_stock_level")
+}
+
+model ItemAttribute {
+  id              BigInt   @id @default(autoincrement())
+  itemId          BigInt   @unique @map("item_id")
+  pipeType        String?  @map("pipe_type")
+  steelGrade      String?  @map("steel_grade")
+  diameterMm      Decimal? @map("diameter_mm") @db.Decimal(20, 6)
+  wallThicknessMm Decimal? @map("wall_thickness_mm") @db.Decimal(20, 6)
+  lengthMm        Decimal? @map("length_mm") @db.Decimal(20, 6)
+  weightKgPerUnit Decimal? @map("weight_kg_per_unit") @db.Decimal(20, 6)
+  insulationType  String?  @map("insulation_type")
+  gost            String?
+  extra           Json?
+
+  item Item @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([steelGrade])
+  @@index([diameterMm])
+  @@map("item_attribute")
+}
+
+model ItemUnit {
+  id     BigInt  @id @default(autoincrement())
+  itemId BigInt  @map("item_id")
+  unitId BigInt  @map("unit_id")
+  factor Decimal @db.Decimal(20, 8)
+
+  item Item @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  unit Unit @relation(fields: [unitId], references: [id])
+
+  @@unique([itemId, unitId])
+  @@map("item_unit")
+}
+
+model Partner {
+  id               BigInt      @id @default(autoincrement())
+  uid              String      @unique @default(uuid(7)) @db.Uuid
+  companyId        BigInt      @map("company_id")
+  partnerType      PartnerType @default(company) @map("partner_type")
+  nameRu           String      @map("name_ru")
+  nameUz           String      @map("name_uz")
+  inn              String?
+  bankDetails      Json?       @map("bank_details")
+  legalAddress     String?     @map("legal_address")
+  actualAddress    String?     @map("actual_address")
+  isClient         Boolean     @default(true) @map("is_client")
+  isSupplier       Boolean     @default(false) @map("is_supplier")
+  managerId        BigInt?     @map("manager_id")
+  sourceId         BigInt?     @map("source_id")
+  priceTypeId      BigInt?     @map("price_type_id")
+  paymentDelayDays Int         @default(0) @map("payment_delay_days")
+  debtLimit        Decimal     @default(0) @map("debt_limit") @db.Decimal(20, 4)
+  tags             String[]    @default([])
+  isActive         Boolean     @default(true) @map("is_active")
+  archivedAt       DateTime?   @map("archived_at") @db.Timestamptz(6)
+  version          Int         @default(1)
+  createdAt        DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company       Company            @relation(fields: [companyId], references: [id])
+  manager       UserAccount?       @relation("PartnerManager", fields: [managerId], references: [id])
+  priceType     PriceType?         @relation(fields: [priceTypeId], references: [id])
+  source        LeadSource?        @relation(fields: [sourceId], references: [id])
+  contacts      PartnerContact[]
+  prices        PartnerPrice[]
+  batches       Batch[]
+  moves         StockMove[]
+  salesOrders   SalesOrder[]
+  financeOps    FinanceOperation[]
+  deals         Deal[]
+  leads         Lead[]
+  documents     Document[]
+  crmTasks      CrmTask[]
+  crmActivities CrmActivity[]
+  attachments   Attachment[]
+
+  @@unique([companyId, inn])
+  @@index([companyId, nameRu])
+  @@map("partner")
+}
+
+model PartnerContact {
+  id        BigInt  @id @default(autoincrement())
+  uid       String  @unique @default(uuid(7)) @db.Uuid
+  partnerId BigInt  @map("partner_id")
+  fullName  String  @map("full_name")
+  position  String?
+  phone     String?
+  email     String?
+  telegram  String?
+  isPrimary Boolean @default(false) @map("is_primary")
+
+  partner Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@index([partnerId])
+  @@map("partner_contact")
+}
+
+// ---------------------------------------------------------------------------
+// 3. Склад
+// ---------------------------------------------------------------------------
+
+model Warehouse {
+  id        BigInt  @id @default(autoincrement())
+  uid       String  @unique @default(uuid(7)) @db.Uuid
+  companyId BigInt  @map("company_id")
+  code      String
+  nameRu    String  @map("name_ru")
+  nameUz    String  @map("name_uz")
+  address   String?
+  isActive  Boolean @default(true) @map("is_active")
+
+  company         Company              @relation(fields: [companyId], references: [id])
+  zones           WarehouseZone[]
+  balances        StockBalance[]
+  stockLevels     ItemStockLevel[]
+  movesFrom       StockMove[]          @relation("MoveFromWarehouse")
+  movesTo         StockMove[]          @relation("MoveToWarehouse")
+  reservations    StockReservation[]
+  inventorySheets InventorySheet[]
+  salesOrders     SalesOrder[]
+  salesOrderLines SalesOrderLine[]
+  shipments       Shipment[]
+  assignments     UserRoleAssignment[]
+
+  @@unique([companyId, code])
+  @@map("warehouse")
+}
+
+model WarehouseZone {
+  id          BigInt  @id @default(autoincrement())
+  uid         String  @unique @default(uuid(7)) @db.Uuid
+  warehouseId BigInt  @map("warehouse_id")
+  code        String
+  nameRu      String  @map("name_ru")
+  nameUz      String  @map("name_uz")
+  isActive    Boolean @default(true) @map("is_active")
+
+  warehouse       Warehouse         @relation(fields: [warehouseId], references: [id])
+  locations       StorageLocation[]
+  inventorySheets InventorySheet[]
+
+  @@unique([warehouseId, code])
+  @@map("warehouse_zone")
+}
+
+model StorageLocation {
+  id       BigInt  @id @default(autoincrement())
+  uid      String  @unique @default(uuid(7)) @db.Uuid
+  zoneId   BigInt  @map("zone_id")
+  code     String
+  barcode  String?
+  isActive Boolean @default(true) @map("is_active")
+
+  zone           WarehouseZone        @relation(fields: [zoneId], references: [id])
+  balances       StockBalance[]
+  movesFrom      StockMove[]          @relation("MoveFromLocation")
+  movesTo        StockMove[]          @relation("MoveToLocation")
+  inventoryLines InventorySheetLine[]
+
+  @@unique([zoneId, code])
+  @@map("storage_location")
+}
+
+model Batch {
+  id                BigInt    @id @default(autoincrement())
+  uid               String    @unique @default(uuid(7)) @db.Uuid
+  companyId         BigInt    @map("company_id")
+  itemId            BigInt    @map("item_id")
+  number            String
+  producedAt        DateTime? @map("produced_at") @db.Timestamptz(6)
+  receivedAt        DateTime  @default(now()) @map("received_at") @db.Timestamptz(6)
+  supplierId        BigInt?   @map("supplier_id")
+  productionOrderId BigInt?   @map("production_order_id")
+  unitCost          Decimal   @default(0) @map("unit_cost") @db.Decimal(20, 4)
+  expiresAt         DateTime? @map("expires_at") @db.Timestamptz(6)
+  certificateNumber String?   @map("certificate_number")
+
+  company         Company              @relation(fields: [companyId], references: [id])
+  item            Item                 @relation(fields: [itemId], references: [id])
+  supplier        Partner?             @relation(fields: [supplierId], references: [id])
+  productionOrder ProductionOrder?     @relation(fields: [productionOrderId], references: [id])
+  serials         SerialNumber[]
+  moves           StockMove[]
+  balances        StockBalance[]
+  reservations    StockReservation[]
+  inventoryLines  InventorySheetLine[]
+  outputs         ProductionOutput[]
+  shipmentLines   ShipmentLine[]
+  attachments     Attachment[]
+
+  @@unique([companyId, itemId, number])
+  @@index([companyId, receivedAt])
+  @@map("batch")
+}
+
+model SerialNumber {
+  id           BigInt      @id @default(autoincrement())
+  companyId    BigInt      @map("company_id")
+  itemId       BigInt      @map("item_id")
+  batchId      BigInt?     @map("batch_id")
+  number       String
+  currentState SerialState @default(in_stock) @map("current_state")
+
+  company        Company              @relation(fields: [companyId], references: [id])
+  item           Item                 @relation(fields: [itemId], references: [id])
+  batch          Batch?               @relation(fields: [batchId], references: [id])
+  moves          StockMove[]
+  balances       StockBalance[]
+  shipmentLines  ShipmentLine[]
+  inventoryLines InventorySheetLine[]
+
+  @@unique([companyId, number])
+  @@map("serial_number")
+}
+
+model StockReason {
+  id        BigInt     @id @default(autoincrement())
+  uid       String     @unique @default(uuid(7)) @db.Uuid
+  companyId BigInt     @map("company_id")
+  kind      ReasonKind
+  nameRu    String     @map("name_ru")
+  nameUz    String     @map("name_uz")
+  isActive  Boolean    @default(true) @map("is_active")
+
+  company     Company                @relation(fields: [companyId], references: [id])
+  moves       StockMove[]
+  outputs     ProductionOutput[]
+  deviations  DeviationLog[]
+  stageEvents ProductionStageEvent[]
+
+  @@index([companyId, kind])
+  @@map("stock_reason")
+}
+
+/// Журнал движений. Только добавление: строка не обновляется и не удаляется,
+/// исправление — новая строка со ссылкой reversalOfId. Остаток — производная
+/// от журнала, а не отдельная истина.
+model StockMove {
+  id              BigInt        @id @default(autoincrement())
+  uid             String        @unique @default(uuid(7)) @db.Uuid
+  companyId       BigInt        @map("company_id")
+  movedAt         DateTime      @default(now()) @map("moved_at") @db.Timestamptz(6)
+  operationType   OperationType @map("operation_type")
+  itemId          BigInt        @map("item_id")
+  batchId         BigInt?       @map("batch_id")
+  serialId        BigInt?       @map("serial_id")
+  fromWarehouseId BigInt?       @map("from_warehouse_id")
+  fromLocationId  BigInt?       @map("from_location_id")
+  toWarehouseId   BigInt?       @map("to_warehouse_id")
+  toLocationId    BigInt?       @map("to_location_id")
+  qty             Decimal       @db.Decimal(20, 6)
+  unitId          BigInt        @map("unit_id")
+  qtyBase         Decimal       @map("qty_base") @db.Decimal(20, 6)
+  costTotal       Decimal       @default(0) @map("cost_total") @db.Decimal(20, 4)
+  sourceDocType   String?       @map("source_doc_type")
+  sourceDocId     BigInt?       @map("source_doc_id")
+  partnerId       BigInt?       @map("partner_id")
+  reasonId        BigInt?       @map("reason_id")
+  reversalOfId    BigInt?       @map("reversal_of_id")
+  /// Движение прошло по зоне, где в этот момент считали (режим «помечать»,
+  /// ТЗ 5.8). Пометка нужна тому, кто разбирает расхождения: посчитанное
+  /// относится к моменту подсчёта, а это движение случилось рядом с ним.
+  duringInventory Boolean       @default(false) @map("during_inventory")
+  comment         String?
+  createdBy       BigInt?       @map("created_by")
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  idempotencyKey  String?       @map("idempotency_key")
+
+  company       Company          @relation(fields: [companyId], references: [id])
+  item          Item             @relation(fields: [itemId], references: [id])
+  batch         Batch?           @relation(fields: [batchId], references: [id])
+  serial        SerialNumber?    @relation(fields: [serialId], references: [id])
+  unit          Unit             @relation(fields: [unitId], references: [id])
+  fromWarehouse Warehouse?       @relation("MoveFromWarehouse", fields: [fromWarehouseId], references: [id])
+  toWarehouse   Warehouse?       @relation("MoveToWarehouse", fields: [toWarehouseId], references: [id])
+  fromLocation  StorageLocation? @relation("MoveFromLocation", fields: [fromLocationId], references: [id])
+  toLocation    StorageLocation? @relation("MoveToLocation", fields: [toLocationId], references: [id])
+  partner       Partner?         @relation(fields: [partnerId], references: [id])
+  reason        StockReason?     @relation(fields: [reasonId], references: [id])
+  reversalOf    StockMove?       @relation("MoveReversal", fields: [reversalOfId], references: [id])
+  reversedBy    StockMove[]      @relation("MoveReversal")
+  attachments   Attachment[]
+
+  @@unique([companyId, idempotencyKey])
+  @@index([companyId, itemId, movedAt])
+  @@index([companyId, movedAt(sort: Desc)])
+  @@index([batchId])
+  @@index([serialId])
+  @@index([sourceDocType, sourceDocId])
+  @@map("stock_move")
+}
+
+/// Агрегат остатков, обновляется в одной транзакции со StockMove.
+/// qtyAvailable — генерируемый столбец (создаётся в SQL миграции):
+/// вычисляемая величина не может разойтись с исходными.
+model StockBalance {
+  id           BigInt   @id @default(autoincrement())
+  companyId    BigInt   @map("company_id")
+  warehouseId  BigInt   @map("warehouse_id")
+  locationId   BigInt?  @map("location_id")
+  itemId       BigInt   @map("item_id")
+  batchId      BigInt?  @map("batch_id")
+  serialId     BigInt?  @map("serial_id")
+  qtyOnHand    Decimal  @default(0) @map("qty_on_hand") @db.Decimal(20, 6)
+  qtyReserved  Decimal  @default(0) @map("qty_reserved") @db.Decimal(20, 6)
+  qtyAvailable Decimal  @default(0) @map("qty_available") @db.Decimal(20, 6)
+  unitCost     Decimal  @default(0) @map("unit_cost") @db.Decimal(20, 4)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  company   Company          @relation(fields: [companyId], references: [id])
+  warehouse Warehouse        @relation(fields: [warehouseId], references: [id])
+  location  StorageLocation? @relation(fields: [locationId], references: [id])
+  item      Item             @relation(fields: [itemId], references: [id])
+  batch     Batch?           @relation(fields: [batchId], references: [id])
+  serial    SerialNumber?    @relation(fields: [serialId], references: [id])
+
+  @@unique([companyId, warehouseId, locationId, itemId, batchId, serialId])
+  @@index([companyId, itemId])
+  @@map("stock_balance")
+}
+
+model StockReservation {
+  id               BigInt            @id @default(autoincrement())
+  uid              String            @unique @default(uuid(7)) @db.Uuid
+  companyId        BigInt            @map("company_id")
+  salesOrderLineId BigInt?           @map("sales_order_line_id")
+  itemId           BigInt            @map("item_id")
+  batchId          BigInt?           @map("batch_id")
+  warehouseId      BigInt            @map("warehouse_id")
+  qty              Decimal           @db.Decimal(20, 6)
+  expiresAt        DateTime?         @map("expires_at") @db.Timestamptz(6)
+  status           ReservationStatus @default(active)
+  createdBy        BigInt?           @map("created_by")
+  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company        Company         @relation(fields: [companyId], references: [id])
+  item           Item            @relation(fields: [itemId], references: [id])
+  batch          Batch?          @relation(fields: [batchId], references: [id])
+  warehouse      Warehouse       @relation(fields: [warehouseId], references: [id])
+  salesOrderLine SalesOrderLine? @relation(fields: [salesOrderLineId], references: [id])
+
+  @@index([companyId, status])
+  @@index([companyId, warehouseId, itemId, status], map: "stock_reservation_lookup_idx")
+  @@map("stock_reservation")
+}
+
+/// Лист инвентаризации (ТЗ 5.8).
+///
+/// Лист — это снимок: в момент создания в строки записывается учётное
+/// количество по каждой ячейке и партии. Сравнивать посчитанное с текущим
+/// остатком нельзя — пока идут подсчёт и утверждение, остаток живёт своей
+/// жизнью, и расхождение поплывёт вместе с ним.
+model InventorySheet {
+  id          BigInt             @id @default(autoincrement())
+  uid         String             @unique @default(uuid(7)) @db.Uuid
+  companyId   BigInt             @map("company_id")
+  number      String
+  warehouseId BigInt             @map("warehouse_id")
+  zoneId      BigInt?            @map("zone_id")
+  status      InventoryStatus    @default(draft)
+  blockMode   InventoryBlockMode @default(mark) @map("block_mode")
+  comment     String?
+  createdBy   BigInt?            @map("created_by")
+  createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  countedAt   DateTime?          @map("counted_at") @db.Timestamptz(6)
+  approvedBy  BigInt?            @map("approved_by")
+  approvedAt  DateTime?          @map("approved_at") @db.Timestamptz(6)
+
+  company   Company              @relation(fields: [companyId], references: [id])
+  warehouse Warehouse            @relation(fields: [warehouseId], references: [id])
+  zone      WarehouseZone?       @relation(fields: [zoneId], references: [id])
+  author    UserAccount?         @relation("InventoryAuthor", fields: [createdBy], references: [id])
+  approver  UserAccount?         @relation("InventoryApprover", fields: [approvedBy], references: [id])
+  lines     InventorySheetLine[]
+
+  @@unique([companyId, number])
+  @@index([companyId, status])
+  @@index([companyId, warehouseId, status])
+  @@map("inventory_sheet")
+}
+
+/// Строка листа: ячейка, позиция, партия — тот же ключ, которым живёт остаток.
+/// `qtyDiff` заполняет триггер, как и `qtyAvailable` у остатка: приложение его
+/// не пишет, а CHECK не даёт ему разойтись с посчитанным.
+model InventorySheetLine {
+  id          BigInt    @id @default(autoincrement())
+  uid         String    @unique @default(uuid(7)) @db.Uuid
+  sheetId     BigInt    @map("sheet_id")
+  seq         Int
+  itemId      BigInt    @map("item_id")
+  batchId     BigInt?   @map("batch_id")
+  serialId    BigInt?   @map("serial_id")
+  locationId  BigInt?   @map("location_id")
+  qtyExpected Decimal   @default(0) @map("qty_expected") @db.Decimal(20, 6)
+  qtyCounted  Decimal?  @map("qty_counted") @db.Decimal(20, 6)
+  qtyDiff     Decimal?  @map("qty_diff") @db.Decimal(20, 6)
+  unitCost    Decimal   @default(0) @map("unit_cost") @db.Decimal(20, 4)
+  countedBy   BigInt?   @map("counted_by")
+  countedAt   DateTime? @map("counted_at") @db.Timestamptz(6)
+  comment     String?
+
+  sheet    InventorySheet   @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+  item     Item             @relation(fields: [itemId], references: [id])
+  batch    Batch?           @relation(fields: [batchId], references: [id])
+  serial   SerialNumber?    @relation(fields: [serialId], references: [id])
+  location StorageLocation? @relation(fields: [locationId], references: [id])
+  counter  UserAccount?     @relation("InventoryCounter", fields: [countedBy], references: [id])
+
+  @@unique([sheetId, seq])
+  @@index([sheetId])
+  @@index([serialId])
+  @@map("inventory_sheet_line")
+}
+
+/// Шаблон листа этикеток (ТЗ 5.9). Размеры в миллиметрах: печать меряется
+/// линейкой, а не пикселями. Сетка обязана помещаться на лист — это стережёт
+/// CHECK в базе, не форма.
+model LabelTemplate {
+  id            BigInt         @id @default(autoincrement())
+  uid           String         @unique @default(uuid(7)) @db.Uuid
+  companyId     BigInt         @map("company_id")
+  code          String
+  nameRu        String         @map("name_ru")
+  nameUz        String         @map("name_uz")
+  pageWidthMm   Decimal        @map("page_width_mm") @db.Decimal(8, 2)
+  pageHeightMm  Decimal        @map("page_height_mm") @db.Decimal(8, 2)
+  labelWidthMm  Decimal        @map("label_width_mm") @db.Decimal(8, 2)
+  labelHeightMm Decimal        @map("label_height_mm") @db.Decimal(8, 2)
+  columns       Int
+  rows          Int
+  marginTopMm   Decimal        @default(0) @map("margin_top_mm") @db.Decimal(8, 2)
+  marginLeftMm  Decimal        @default(0) @map("margin_left_mm") @db.Decimal(8, 2)
+  gapXMm        Decimal        @default(0) @map("gap_x_mm") @db.Decimal(8, 2)
+  gapYMm        Decimal        @default(0) @map("gap_y_mm") @db.Decimal(8, 2)
+  symbology     LabelSymbology @default(code128)
+  isDefault     Boolean        @default(false) @map("is_default")
+  isActive      Boolean        @default(true) @map("is_active")
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, code])
+  @@map("label_template")
+}
+
+// ---------------------------------------------------------------------------
+// 4. Производство
+// ---------------------------------------------------------------------------
+
+model WorkCenter {
+  id               BigInt  @id @default(autoincrement())
+  companyId        BigInt  @map("company_id")
+  code             String
+  nameRu           String  @map("name_ru")
+  nameUz           String  @map("name_uz")
+  capacityPerShift Decimal @default(0) @map("capacity_per_shift") @db.Decimal(20, 6)
+  /// Стоимость часа работы участка: из неё считаются прямые затраты заказа
+  /// (ТЗ 4.7 п.3). Ноль — ставка не заведена, затрат нет.
+  costPerHour      Decimal @default(0) @map("cost_per_hour") @db.Decimal(20, 4)
+  isActive         Boolean @default(true) @map("is_active")
+
+  company        Company           @relation(fields: [companyId], references: [id])
+  stages         ProductionStage[]
+  techCardStages TechCardStage[]
+  deviations     DeviationLog[]
+
+  @@unique([companyId, code])
+  @@map("work_center")
+}
+
+/// Смена завода: во сколько начинается и во сколько кончается.
+///
+/// Ночная смена проходит через полночь — конец меньше начала, и длительность
+/// считается с переходом через сутки.
+model ProductionShift {
+  id        BigInt   @id @default(autoincrement())
+  uid       String   @unique @default(uuid(7)) @db.Uuid
+  companyId BigInt   @map("company_id")
+  code      String
+  nameRu    String   @map("name_ru")
+  nameUz    String   @map("name_uz")
+  startsAt  DateTime @map("starts_at") @db.Time(0)
+  endsAt    DateTime @map("ends_at") @db.Time(0)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, code])
+  @@map("production_shift")
+}
+
+/// Исключение в календаре: праздник среди недели или рабочая суббота.
+/// Обычные дни здесь не лежат — их задаёт рабочая неделя компании.
+model ProductionCalendarDay {
+  id        BigInt   @id @default(autoincrement())
+  companyId BigInt   @map("company_id")
+  day       DateTime @db.Date
+  isWorking Boolean  @map("is_working")
+  comment   String?
+  createdBy BigInt?  @map("created_by")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company Company      @relation(fields: [companyId], references: [id])
+  author  UserAccount? @relation(fields: [createdBy], references: [id])
+
+  @@unique([companyId, day])
+  @@map("production_calendar_day")
+}
+
+model TechCard {
+  id           BigInt         @id @default(autoincrement())
+  uid          String         @unique @default(uuid(7)) @db.Uuid
+  companyId    BigInt         @map("company_id")
+  itemId       BigInt         @map("item_id")
+  version      Int            @default(1)
+  nameRu       String         @map("name_ru")
+  nameUz       String         @map("name_uz")
+  status       TechCardStatus @default(draft)
+  outputQty    Decimal        @default(1) @map("output_qty") @db.Decimal(20, 6)
+  outputUnitId BigInt         @map("output_unit_id")
+  validFrom    DateTime?      @map("valid_from") @db.Timestamptz(6)
+  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company    Company            @relation(fields: [companyId], references: [id])
+  item       Item               @relation(fields: [itemId], references: [id])
+  outputUnit Unit               @relation(fields: [outputUnitId], references: [id])
+  stages     TechCardStage[]
+  materials  TechCardMaterial[]
+  orders     ProductionOrder[]
+
+  @@unique([companyId, itemId, version])
+  @@map("tech_card")
+}
+
+model TechCardStage {
+  id              BigInt  @id @default(autoincrement())
+  techCardId      BigInt  @map("tech_card_id")
+  seq             Int
+  nameRu          String  @map("name_ru")
+  nameUz          String  @map("name_uz")
+  workCenterId    BigInt? @map("work_center_id")
+  normDurationMin Int     @default(0) @map("norm_duration_min")
+  isParallel      Boolean @default(false) @map("is_parallel")
+  wastePercent    Decimal @default(0) @map("waste_percent") @db.Decimal(9, 4)
+
+  techCard   TechCard           @relation(fields: [techCardId], references: [id], onDelete: Cascade)
+  workCenter WorkCenter?        @relation(fields: [workCenterId], references: [id])
+  materials  TechCardMaterial[]
+
+  @@unique([techCardId, seq])
+  @@map("tech_card_stage")
+}
+
+model TechCardMaterial {
+  id             BigInt  @id @default(autoincrement())
+  techCardId     BigInt  @map("tech_card_id")
+  stageId        BigInt? @map("stage_id")
+  itemId         BigInt  @map("item_id")
+  qtyPerUnit     Decimal @map("qty_per_unit") @db.Decimal(20, 6)
+  unitId         BigInt  @map("unit_id")
+  isAutoWriteoff Boolean @default(true) @map("is_auto_writeoff")
+
+  techCard TechCard       @relation(fields: [techCardId], references: [id], onDelete: Cascade)
+  stage    TechCardStage? @relation(fields: [stageId], references: [id])
+  item     Item           @relation(fields: [itemId], references: [id])
+  unit     Unit           @relation(fields: [unitId], references: [id])
+
+  @@index([techCardId])
+  @@map("tech_card_material")
+}
+
+model ProductionOrder {
+  id              BigInt           @id @default(autoincrement())
+  uid             String           @unique @default(uuid(7)) @db.Uuid
+  companyId       BigInt           @map("company_id")
+  number          String
+  itemId          BigInt           @map("item_id")
+  techCardId      BigInt?          @map("tech_card_id")
+  techCardVersion Int?             @map("tech_card_version")
+  qtyPlanned      Decimal          @map("qty_planned") @db.Decimal(20, 6)
+  qtyProduced     Decimal          @default(0) @map("qty_produced") @db.Decimal(20, 6)
+  qtyDefect       Decimal          @default(0) @map("qty_defect") @db.Decimal(20, 6)
+  qtyWaste        Decimal          @default(0) @map("qty_waste") @db.Decimal(20, 6)
+  unitId          BigInt           @map("unit_id")
+  dueDate         DateTime         @map("due_date") @db.Date
+  status          ProductionStatus @default(draft)
+  priority        Int              @default(0)
+  /**
+   * Зачем заказ и почему остановлен: причина паузы и отмены видна в карточке.
+   */
+  comment         String?
+  responsibleId   BigInt?          @map("responsible_id")
+  salesOrderId    BigInt?          @map("sales_order_id")
+  parentOrderId   BigInt?          @map("parent_order_id")
+  startedAt       DateTime?        @map("started_at") @db.Timestamptz(6)
+  finishedAt      DateTime?        @map("finished_at") @db.Timestamptz(6)
+  closedAt        DateTime?        @map("closed_at") @db.Timestamptz(6)
+  version         Int              @default(1)
+  createdBy       BigInt?          @map("created_by")
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company     Company               @relation(fields: [companyId], references: [id])
+  item        Item                  @relation(fields: [itemId], references: [id])
+  techCard    TechCard?             @relation(fields: [techCardId], references: [id])
+  unit        Unit                  @relation(fields: [unitId], references: [id])
+  responsible UserAccount?          @relation("ProductionResponsible", fields: [responsibleId], references: [id])
+  salesOrder  SalesOrder?           @relation(fields: [salesOrderId], references: [id])
+  parentOrder ProductionOrder?      @relation("ProductionRework", fields: [parentOrderId], references: [id])
+  reworks     ProductionOrder[]     @relation("ProductionRework")
+  stages      ProductionStage[]
+  materials   ProductionMaterial[]
+  outputs     ProductionOutput[]
+  costs       ProductionOrderCost[]
+  deviations  DeviationLog[]
+  batches     Batch[]
+  attachments Attachment[]
+
+  @@unique([companyId, number])
+  @@index([companyId, status, dueDate])
+  @@map("production_order")
+}
+
+model ProductionStage {
+  id                 BigInt      @id @default(autoincrement())
+  /// Этап адресуется наружу uid: по нему к операции прикладывают фото.
+  uid                String      @unique @default(uuid(7)) @db.Uuid
+  productionOrderId  BigInt      @map("production_order_id")
+  seq                Int
+  nameRu             String      @map("name_ru")
+  nameUz             String      @map("name_uz")
+  workCenterId       BigInt?     @map("work_center_id")
+  responsibleId      BigInt?     @map("responsible_id")
+  plannedStart       DateTime?   @map("planned_start") @db.Timestamptz(6)
+  plannedEnd         DateTime?   @map("planned_end") @db.Timestamptz(6)
+  plannedDurationMin Int         @default(0) @map("planned_duration_min")
+  actualDurationMin  Int         @default(0) @map("actual_duration_min")
+  status             StageStatus @default(pending)
+  comment            String?
+
+  order       ProductionOrder        @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+  workCenter  WorkCenter?            @relation(fields: [workCenterId], references: [id])
+  events      ProductionStageEvent[]
+  materials   ProductionMaterial[]
+  outputs     ProductionOutput[]
+  deviations  DeviationLog[]
+  attachments Attachment[]
+
+  @@unique([productionOrderId, seq])
+  @@map("production_stage")
+}
+
+/// Фактическое время этапа считается по событиям, а не хранится перезаписью:
+/// иначе после пауз не восстановить, сколько этап шёл на самом деле.
+model ProductionStageEvent {
+  id         BigInt     @id @default(autoincrement())
+  stageId    BigInt     @map("stage_id")
+  event      StageEvent
+  occurredAt DateTime   @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  userId     BigInt?    @map("user_id")
+  reasonId   BigInt?    @map("reason_id")
+  comment    String?
+
+  stage  ProductionStage @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  reason StockReason?    @relation(fields: [reasonId], references: [id])
+
+  @@index([stageId, occurredAt])
+  @@map("production_stage_event")
+}
+
+model ProductionMaterial {
+  id                BigInt  @id @default(autoincrement())
+  productionOrderId BigInt  @map("production_order_id")
+  stageId           BigInt? @map("stage_id")
+  itemId            BigInt  @map("item_id")
+  qtyPlanned        Decimal @default(0) @map("qty_planned") @db.Decimal(20, 6)
+  qtyIssued         Decimal @default(0) @map("qty_issued") @db.Decimal(20, 6)
+  qtyUsed           Decimal @default(0) @map("qty_used") @db.Decimal(20, 6)
+  qtyReturned       Decimal @default(0) @map("qty_returned") @db.Decimal(20, 6)
+  unitId            BigInt  @map("unit_id")
+  costTotal         Decimal @default(0) @map("cost_total") @db.Decimal(20, 4)
+
+  order ProductionOrder  @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+  stage ProductionStage? @relation(fields: [stageId], references: [id])
+  item  Item             @relation(fields: [itemId], references: [id])
+  unit  Unit             @relation(fields: [unitId], references: [id])
+
+  @@index([productionOrderId])
+  @@map("production_material")
+}
+
+model ProductionOutput {
+  id                BigInt     @id @default(autoincrement())
+  productionOrderId BigInt     @map("production_order_id")
+  stageId           BigInt?    @map("stage_id")
+  itemId            BigInt     @map("item_id")
+  batchId           BigInt?    @map("batch_id")
+  qty               Decimal    @db.Decimal(20, 6)
+  kind              OutputKind
+  reasonId          BigInt?    @map("reason_id")
+  /// Что цех сказал об этой записи: причина отвечает «из-за чего», а
+  /// комментарий — «что именно было». Причина выбирается из справочника,
+  /// и подробность смены в неё не укладывается.
+  comment           String?
+  occurredAt        DateTime   @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  userId            BigInt?    @map("user_id")
+
+  order  ProductionOrder  @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+  stage  ProductionStage? @relation(fields: [stageId], references: [id])
+  item   Item             @relation(fields: [itemId], references: [id])
+  batch  Batch?           @relation(fields: [batchId], references: [id])
+  reason StockReason?     @relation(fields: [reasonId], references: [id])
+
+  @@index([productionOrderId, kind])
+  @@map("production_output")
+}
+
+/// Снимок себестоимости. Пересчёт создаёт новую строку, прежняя помечается
+/// isCurrent = false: история расчётов не теряется.
+model ProductionOrderCost {
+  id                BigInt   @id @default(autoincrement())
+  productionOrderId BigInt   @map("production_order_id")
+  calculatedAt      DateTime @default(now()) @map("calculated_at") @db.Timestamptz(6)
+  materialCost      Decimal  @default(0) @map("material_cost") @db.Decimal(20, 4)
+  semiCost          Decimal  @default(0) @map("semi_cost") @db.Decimal(20, 4)
+  directCost        Decimal  @default(0) @map("direct_cost") @db.Decimal(20, 4)
+  reworkCost        Decimal  @default(0) @map("rework_cost") @db.Decimal(20, 4)
+  totalCost         Decimal  @default(0) @map("total_cost") @db.Decimal(20, 4)
+  qtyGood           Decimal  @default(0) @map("qty_good") @db.Decimal(20, 6)
+  unitCost          Decimal  @default(0) @map("unit_cost") @db.Decimal(20, 4)
+  calculatedBy      BigInt?  @map("calculated_by")
+  isCurrent         Boolean  @default(true) @map("is_current")
+
+  order ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+
+  @@index([productionOrderId, isCurrent])
+  @@map("production_order_cost")
+}
+
+model DeviationLog {
+  id                BigInt        @id @default(autoincrement())
+  companyId         BigInt        @map("company_id")
+  productionOrderId BigInt?       @map("production_order_id")
+  stageId           BigInt?       @map("stage_id")
+  kind              DeviationKind
+  reasonId          BigInt?       @map("reason_id")
+  /// Простой бывает и без этапа: линия стояла без заказа (Э7).
+  workCenterId      BigInt?       @map("work_center_id")
+  occurredAt        DateTime      @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  durationMin       Int           @default(0) @map("duration_min")
+  amount            Decimal       @default(0) @db.Decimal(20, 4)
+  comment           String?
+  registeredBy      BigInt?       @map("registered_by")
+
+  company Company          @relation(fields: [companyId], references: [id])
+  order   ProductionOrder? @relation(fields: [productionOrderId], references: [id])
+  stage   ProductionStage? @relation(fields: [stageId], references: [id])
+  reason  StockReason?     @relation(fields: [reasonId], references: [id])
+  center  WorkCenter?      @relation(fields: [workCenterId], references: [id])
+
+  @@index([companyId, occurredAt(sort: Desc)])
+  @@map("deviation_log")
+}
+
+// ---------------------------------------------------------------------------
+// 5. Продажи
+// ---------------------------------------------------------------------------
+
+model PriceType {
+  id        BigInt        @id @default(autoincrement())
+  uid       String        @unique @default(uuid(7)) @db.Uuid
+  companyId BigInt        @map("company_id")
+  code      String
+  nameRu    String        @map("name_ru")
+  nameUz    String        @map("name_uz")
+  kind      PriceTypeKind
+
+  company     Company      @relation(fields: [companyId], references: [id])
+  priceLists  PriceList[]
+  partners    Partner[]
+  salesOrders SalesOrder[]
+
+  @@unique([companyId, code])
+  @@map("price_type")
+}
+
+model PriceList {
+  id          BigInt    @id @default(autoincrement())
+  uid         String    @unique @default(uuid(7)) @db.Uuid
+  companyId   BigInt    @map("company_id")
+  priceTypeId BigInt    @map("price_type_id")
+  itemId      BigInt    @map("item_id")
+  price       Decimal   @db.Decimal(20, 4)
+  currencyId  BigInt    @map("currency_id")
+  validFrom   DateTime  @map("valid_from") @db.Date
+  validTo     DateTime? @map("valid_to") @db.Date
+
+  company   Company   @relation(fields: [companyId], references: [id])
+  priceType PriceType @relation(fields: [priceTypeId], references: [id])
+  item      Item      @relation(fields: [itemId], references: [id])
+  currency  Currency  @relation(fields: [currencyId], references: [id])
+
+  @@index([companyId, itemId, priceTypeId, validFrom])
+  @@map("price_list")
+}
+
+model PartnerPrice {
+  id         BigInt    @id @default(autoincrement())
+  uid        String    @unique @default(uuid(7)) @db.Uuid
+  companyId  BigInt    @map("company_id")
+  partnerId  BigInt    @map("partner_id")
+  itemId     BigInt    @map("item_id")
+  price      Decimal   @db.Decimal(20, 4)
+  currencyId BigInt    @map("currency_id")
+  validFrom  DateTime  @map("valid_from") @db.Date
+  validTo    DateTime? @map("valid_to") @db.Date
+
+  company  Company  @relation(fields: [companyId], references: [id])
+  partner  Partner  @relation(fields: [partnerId], references: [id])
+  item     Item     @relation(fields: [itemId], references: [id])
+  currency Currency @relation(fields: [currencyId], references: [id])
+
+  @@index([companyId, partnerId, itemId, validFrom])
+  @@map("partner_price")
+}
+
+/// Статус заказа, статус оплаты и статус отгрузки — три независимые оси.
+/// Отгруженный неоплаченный заказ с отсрочкой это норма, а не исключение,
+/// поэтому одним полем они не описываются.
+model SalesOrder {
+  id             BigInt         @id @default(autoincrement())
+  uid            String         @unique @default(uuid(7)) @db.Uuid
+  companyId      BigInt         @map("company_id")
+  number         String
+  partnerId      BigInt         @map("partner_id")
+  dealId         BigInt?        @map("deal_id")
+  managerId      BigInt?        @map("manager_id")
+  orderDate      DateTime       @map("order_date") @db.Date
+  deliveryDate   DateTime?      @map("delivery_date") @db.Date
+  paymentDueDate DateTime?      @map("payment_due_date") @db.Date
+  warehouseId    BigInt?        @map("warehouse_id")
+  priceTypeId    BigInt?        @map("price_type_id")
+  currencyId     BigInt         @map("currency_id")
+  rate           Decimal        @default(1) @db.Decimal(20, 8)
+  amountNet      Decimal        @default(0) @map("amount_net") @db.Decimal(20, 4)
+  amountVat      Decimal        @default(0) @map("amount_vat") @db.Decimal(20, 4)
+  amountTotal    Decimal        @default(0) @map("amount_total") @db.Decimal(20, 4)
+  costTotal      Decimal        @default(0) @map("cost_total") @db.Decimal(20, 4)
+  marginTotal    Decimal        @default(0) @map("margin_total") @db.Decimal(20, 4)
+  paidAmount     Decimal        @default(0) @map("paid_amount") @db.Decimal(20, 4)
+  status         OrderStatus    @default(draft)
+  paymentStatus  PaymentStatus  @default(unpaid) @map("payment_status")
+  shipmentStatus ShipmentStatus @default(none) @map("shipment_status")
+  comment        String?
+  version        Int            @default(1)
+  createdBy      BigInt?        @map("created_by")
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company          Company           @relation(fields: [companyId], references: [id])
+  partner          Partner           @relation(fields: [partnerId], references: [id])
+  manager          UserAccount?      @relation("SalesOrderManager", fields: [managerId], references: [id])
+  warehouse        Warehouse?        @relation(fields: [warehouseId], references: [id])
+  priceType        PriceType?        @relation(fields: [priceTypeId], references: [id])
+  currency         Currency          @relation(fields: [currencyId], references: [id])
+  deal             Deal?             @relation(fields: [dealId], references: [id])
+  lines            SalesOrderLine[]
+  shipments        Shipment[]
+  productionOrders ProductionOrder[]
+
+  @@unique([companyId, number])
+  @@index([companyId, orderDate(sort: Desc)])
+  @@index([companyId, status])
+  @@map("sales_order")
+}
+
+model SalesOrderLine {
+  id              BigInt      @id @default(autoincrement())
+  uid             String      @unique @default(uuid(7)) @db.Uuid
+  salesOrderId    BigInt      @map("sales_order_id")
+  seq             Int
+  itemId          BigInt      @map("item_id")
+  qty             Decimal     @db.Decimal(20, 6)
+  unitId          BigInt      @map("unit_id")
+  price           Decimal     @db.Decimal(20, 4)
+  discountPercent Decimal     @default(0) @map("discount_percent") @db.Decimal(9, 4)
+  vatRate         Decimal     @default(12) @map("vat_rate") @db.Decimal(9, 4)
+  amountNet       Decimal     @default(0) @map("amount_net") @db.Decimal(20, 4)
+  amountVat       Decimal     @default(0) @map("amount_vat") @db.Decimal(20, 4)
+  amountTotal     Decimal     @default(0) @map("amount_total") @db.Decimal(20, 4)
+  costTotal       Decimal     @default(0) @map("cost_total") @db.Decimal(20, 4)
+  warehouseId     BigInt?     @map("warehouse_id")
+  /// Откуда цена: прайс-лист, индивидуальная цена клиента или рука менеджера.
+  /// Без этого поля отчёт по марже не отличает скидку от опечатки.
+  priceSource     PriceSource @default(manual) @map("price_source")
+  /// Что показывал прайс в момент заведения строки. Прайс потом поменяют, а
+  /// спор «почему продали дешевле» разбирают по тому, что было тогда.
+  listPrice       Decimal?    @map("list_price") @db.Decimal(20, 4)
+  /// Себестоимость, с которой сравнивали. Пусто — на складе нечего было
+  /// сравнивать: позиция под заказ, прихода ещё не было.
+  costRef         Decimal?    @map("cost_ref") @db.Decimal(20, 4)
+  /// Обязателен, когда цену поставили руками (ТЗ 9.2).
+  priceComment    String?     @map("price_comment")
+
+  salesOrder    SalesOrder         @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  item          Item               @relation(fields: [itemId], references: [id])
+  unit          Unit               @relation(fields: [unitId], references: [id])
+  warehouse     Warehouse?         @relation(fields: [warehouseId], references: [id])
+  reservations  StockReservation[]
+  shipmentLines ShipmentLine[]
+
+  @@unique([salesOrderId, seq])
+  @@map("sales_order_line")
+}
+
+model Shipment {
+  id            BigInt   @id @default(autoincrement())
+  uid           String   @unique @default(uuid(7)) @db.Uuid
+  companyId     BigInt   @map("company_id")
+  salesOrderId  BigInt   @map("sales_order_id")
+  number        String
+  shippedAt     DateTime @default(now()) @map("shipped_at") @db.Timestamptz(6)
+  warehouseId   BigInt?  @map("warehouse_id")
+  responsibleId BigInt?  @map("responsible_id")
+  vehicle       String?
+  driver        String?
+  netWeightT    Decimal? @map("net_weight_t") @db.Decimal(20, 6)
+  grossWeightT  Decimal? @map("gross_weight_t") @db.Decimal(20, 6)
+
+  company    Company        @relation(fields: [companyId], references: [id])
+  salesOrder SalesOrder     @relation(fields: [salesOrderId], references: [id])
+  warehouse  Warehouse?     @relation(fields: [warehouseId], references: [id])
+  lines      ShipmentLine[]
+
+  @@unique([companyId, number])
+  @@index([companyId, shippedAt(sort: Desc)])
+  @@map("shipment")
+}
+
+model ShipmentLine {
+  id               BigInt  @id @default(autoincrement())
+  shipmentId       BigInt  @map("shipment_id")
+  salesOrderLineId BigInt? @map("sales_order_line_id")
+  itemId           BigInt  @map("item_id")
+  batchId          BigInt? @map("batch_id")
+  serialId         BigInt? @map("serial_id")
+  qty              Decimal @db.Decimal(20, 6)
+  costTotal        Decimal @default(0) @map("cost_total") @db.Decimal(20, 4)
+
+  shipment       Shipment        @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  salesOrderLine SalesOrderLine? @relation(fields: [salesOrderLineId], references: [id])
+  item           Item            @relation(fields: [itemId], references: [id])
+  batch          Batch?          @relation(fields: [batchId], references: [id])
+  serial         SerialNumber?   @relation(fields: [serialId], references: [id])
+
+  @@index([shipmentId])
+  @@map("shipment_line")
+}
+
+// ---------------------------------------------------------------------------
+// 6. Финансы
+// ---------------------------------------------------------------------------
+
+model Account {
+  id         BigInt      @id @default(autoincrement())
+  companyId  BigInt      @map("company_id")
+  code       String
+  nameRu     String      @map("name_ru")
+  nameUz     String      @map("name_uz")
+  kind       AccountKind
+  currencyId BigInt      @map("currency_id")
+  isActive   Boolean     @default(true) @map("is_active")
+
+  company    Company            @relation(fields: [companyId], references: [id])
+  currency   Currency           @relation(fields: [currencyId], references: [id])
+  operations FinanceOperation[] @relation("OperationAccount")
+  counterOps FinanceOperation[] @relation("OperationCounterAccount")
+  entries    FinanceEntry[]
+
+  @@unique([companyId, code])
+  @@map("account")
+}
+
+model CashflowItem {
+  id        BigInt            @id @default(autoincrement())
+  uid       String            @unique @default(uuid(7)) @db.Uuid
+  companyId BigInt            @map("company_id")
+  parentId  BigInt?           @map("parent_id")
+  nameRu    String            @map("name_ru")
+  nameUz    String            @map("name_uz")
+  direction CashflowDirection
+  activity  CashflowActivity  @default(operating)
+
+  company    Company            @relation(fields: [companyId], references: [id])
+  parent     CashflowItem?      @relation("CashflowTree", fields: [parentId], references: [id])
+  children   CashflowItem[]     @relation("CashflowTree")
+  operations FinanceOperation[]
+  budgets    Budget[]
+
+  @@index([companyId])
+  @@map("cashflow_item")
+}
+
+model FinanceOperation {
+  id               BigInt        @id @default(autoincrement())
+  uid              String        @unique @default(uuid(7)) @db.Uuid
+  companyId        BigInt        @map("company_id")
+  number           String
+  operationType    FinanceOpType @map("operation_type")
+  occurredAt       DateTime      @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  plannedDate      DateTime?     @map("planned_date") @db.Date
+  accountId        BigInt        @map("account_id")
+  counterAccountId BigInt?       @map("counter_account_id")
+  amount           Decimal       @db.Decimal(20, 4)
+  currencyId       BigInt        @map("currency_id")
+  rate             Decimal       @default(1) @db.Decimal(20, 8)
+  amountBase       Decimal       @map("amount_base") @db.Decimal(20, 4)
+  cashflowItemId   BigInt?       @map("cashflow_item_id")
+  partnerId        BigInt?       @map("partner_id")
+  sourceDocType    String?       @map("source_doc_type")
+  sourceDocId      BigInt?       @map("source_doc_id")
+  status           FinanceStatus @default(draft)
+  reversalOfId     BigInt?       @map("reversal_of_id")
+  comment          String?
+  version          Int           @default(1)
+  createdBy        BigInt?       @map("created_by")
+  approvedBy       BigInt?       @map("approved_by")
+  postedAt         DateTime?     @map("posted_at") @db.Timestamptz(6)
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  idempotencyKey   String?       @map("idempotency_key")
+
+  company        Company            @relation(fields: [companyId], references: [id])
+  account        Account            @relation("OperationAccount", fields: [accountId], references: [id])
+  counterAccount Account?           @relation("OperationCounterAccount", fields: [counterAccountId], references: [id])
+  currency       Currency           @relation(fields: [currencyId], references: [id])
+  cashflowItem   CashflowItem?      @relation(fields: [cashflowItemId], references: [id])
+  partner        Partner?           @relation(fields: [partnerId], references: [id])
+  reversalOf     FinanceOperation?  @relation("OperationReversal", fields: [reversalOfId], references: [id])
+  reversedBy     FinanceOperation[] @relation("OperationReversal")
+  entries        FinanceEntry[]
+  attachments    Attachment[]
+
+  @@unique([companyId, number])
+  @@unique([companyId, idempotencyKey])
+  @@index([companyId, occurredAt(sort: Desc)])
+  @@index([companyId, status])
+  @@map("finance_operation")
+}
+
+/// Проводка двойной записи. Инвариант SUM(debit) = SUM(credit) по операции
+/// проверяется отложенным ограничением на уровне транзакции (SQL миграция):
+/// сходимость держится арифметикой, а не дисциплиной разработчика.
+model FinanceEntry {
+  id          BigInt   @id @default(autoincrement())
+  operationId BigInt   @map("operation_id")
+  companyId   BigInt   @map("company_id")
+  accountId   BigInt   @map("account_id")
+  debit       Decimal  @default(0) @db.Decimal(20, 4)
+  credit      Decimal  @default(0) @db.Decimal(20, 4)
+  amountBase  Decimal  @map("amount_base") @db.Decimal(20, 4)
+  occurredAt  DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+
+  operation FinanceOperation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  company   Company          @relation(fields: [companyId], references: [id])
+  account   Account          @relation(fields: [accountId], references: [id])
+
+  @@index([operationId])
+  @@index([companyId, accountId, occurredAt])
+  @@map("finance_entry")
+}
+
+model Budget {
+  id                   BigInt   @id @default(autoincrement())
+  uid                  String   @unique @default(uuid(7)) @db.Uuid
+  companyId            BigInt   @map("company_id")
+  departmentId         BigInt?  @map("department_id")
+  cashflowItemId       BigInt   @map("cashflow_item_id")
+  periodStart          DateTime @map("period_start") @db.Date
+  periodEnd            DateTime @map("period_end") @db.Date
+  amountPlanned        Decimal  @map("amount_planned") @db.Decimal(20, 4)
+  thresholdWarnPercent Decimal  @default(80) @map("threshold_warn_percent") @db.Decimal(9, 4)
+  responsibleId        BigInt?  @map("responsible_id")
+
+  company      Company      @relation(fields: [companyId], references: [id])
+  department   Department?  @relation(fields: [departmentId], references: [id])
+  cashflowItem CashflowItem @relation(fields: [cashflowItemId], references: [id])
+
+  @@index([companyId, periodStart])
+  @@map("budget")
+}
+
+// ---------------------------------------------------------------------------
+// 7. CRM
+// ---------------------------------------------------------------------------
+
+model LeadSource {
+  id        BigInt      @id @default(autoincrement())
+  uid       String      @unique @default(uuid(7)) @db.Uuid
+  companyId BigInt      @map("company_id")
+  code      String
+  nameRu    String      @map("name_ru")
+  nameUz    String      @map("name_uz")
+  channel   LeadChannel
+  isActive  Boolean     @default(true) @map("is_active")
+
+  company    Company          @relation(fields: [companyId], references: [id])
+  leads      Lead[]
+  firstLeads Lead[]           @relation("LeadFirstSource")
+  partners   Partner[]
+  rules      LeadSourceRule[]
+
+  @@unique([companyId, code])
+  @@map("lead_source")
+}
+
+/// Правило разбора меток: какие метки каким источником считать.
+/// Пустое условие — «любой», побеждает меньший приоритет.
+model LeadSourceRule {
+  id               BigInt   @id @default(autoincrement())
+  uid              String   @unique @default(uuid(7)) @db.Uuid
+  companyId        BigInt   @map("company_id")
+  priority         Int      @default(100)
+  name             String
+  matchMedium      String?  @map("match_medium")
+  matchSource      String?  @map("match_source")
+  matchReferrer    String?  @map("match_referrer")
+  matchHasClick    Boolean? @map("match_has_click")
+  matchHasMarks    Boolean? @map("match_has_marks")
+  matchHasReferrer Boolean? @map("match_has_referrer")
+  sourceId         BigInt   @map("source_id")
+  isActive         Boolean  @default(true) @map("is_active")
+
+  company Company    @relation(fields: [companyId], references: [id])
+  source  LeadSource @relation(fields: [sourceId], references: [id])
+
+  @@index([companyId, priority, id])
+  @@map("lead_source_rule")
+}
+
+/// Ключ сайта для приёма заявок. Секрета нет: форму шлёт браузер посетителя.
+model SiteKey {
+  id         BigInt    @id @default(autoincrement())
+  uid        String    @unique @default(uuid(7)) @db.Uuid
+  companyId  BigInt    @map("company_id")
+  code       String    @unique
+  name       String
+  origins    String[]  @default([])
+  isActive   Boolean   @default(true) @map("is_active")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastUsedAt DateTime? @map("last_used_at") @db.Timestamptz(6)
+  usedCount  Int       @default(0) @map("used_count")
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@map("site_key")
+}
+
+// ---------------------------------------------------------------------------
+// Обменный слой (ТЗ 12, 02-ARCHITECTURE §10)
+// ---------------------------------------------------------------------------
+
+/// Внешняя система: подключение с ключом доступа (ТЗ 12).
+///
+/// Устроена по образцу `SiteKey`, и это не совпадение — набор полей у ключа
+/// внешней системы тот же: название, код, вкл/выкл, разрешённые адреса,
+/// счётчик обращений. Два отличия, и оба от того, что обмен серверный:
+/// ключ здесь настоящий секрет и в базе лежит хешем, а адреса — это IP
+/// отправителя, а не адреса страницы (браузера в обмене нет).
+///
+/// `keyHash` — sha256, а не bcrypt: по ключу нужен поиск на входящем запросе.
+/// `signingSecret` восстановим, иначе HMAC не посчитать; наружу не отдаётся.
+model ExternalSystem {
+  id            BigInt    @id @default(autoincrement())
+  uid           String    @unique @default(uuid(7)) @db.Uuid
+  companyId     BigInt    @map("company_id")
+  code          String
+  name          String
+  isActive      Boolean   @default(true) @map("is_active")
+  keyHash       String    @unique @map("key_hash")
+  /// Последние знаки ключа: по ним человек узнаёт ключ, не получая его снова.
+  keyTail       String    @map("key_tail")
+  signingSecret String?   @map("signing_secret")
+  allowedIps    String[]  @default([]) @map("allowed_ips")
+  comment       String?
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastUsedAt    DateTime? @map("last_used_at") @db.Timestamptz(6)
+  usedCount     Int       @default(0) @map("used_count")
+
+  company       Company               @relation(fields: [companyId], references: [id])
+  subscriptions WebhookSubscription[]
+  messages      ExchangeMessage[]
+  refs          ExternalRef[]
+
+  @@unique([companyId, code])
+  @@map("external_system")
+}
+
+/// Подписка внешней системы на событие (ТЗ 12).
+///
+/// Событие — запись журнала действий вида `<сущность>.<действие>`. Второго
+/// списка событий в системе нет: журнал значимых действий уже отобран по
+/// смыслу и уже переведён на два языка.
+model WebhookSubscription {
+  id        BigInt   @id @default(autoincrement())
+  uid       String   @unique @default(uuid(7)) @db.Uuid
+  companyId BigInt   @map("company_id")
+  systemId  BigInt   @map("system_id")
+  event     String
+  url       String
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company Company        @relation(fields: [companyId], references: [id])
+  system  ExternalSystem @relation(fields: [systemId], references: [id], onDelete: Cascade)
+
+  @@unique([systemId, event])
+  @@index([companyId, event])
+  @@map("webhook_subscription")
+}
+
+/// Сообщение обмена: очередь исходящих, защита от повтора входящих и журнал.
+///
+/// Механика доставки взята у `NotificationOutbox` — `attempts`, `lastError`,
+/// предел попыток, пара «доставлено / неудача». Добавлено то, чего у
+/// уведомлений нет: `nextAttemptAt` (нарастающая задержка; уведомления берут
+/// неудачную строку снова на том же проходе) и `externalId` с уникальностью
+/// (идемпотентность входящих). Долить вебхуки в ту таблицу нельзя: у
+/// уведомления получатель — человек с Telegram, у вебхука — URL.
+model ExchangeMessage {
+  id            BigInt    @id @default(autoincrement())
+  uid           String    @unique @default(uuid(7)) @db.Uuid
+  companyId     BigInt    @map("company_id")
+  systemId      BigInt    @map("system_id")
+  /// `in` — пришло к нам, `out` — ушло от нас.
+  direction     String
+  event         String
+  /// Идентификатор сообщения во внешней системе. Пусто — повтор отследить
+  /// нечем, и это её выбор, а не наш недосмотр.
+  externalId    String?   @map("external_id")
+  status        String    @default("pending")
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  lastError     String?   @map("last_error")
+  url           String?
+  httpStatus    Int?      @map("http_status")
+  /// Тела усечены при записи, а не при показе: иначе журнал обменов за месяц
+  /// занимает больше, чем весь учёт.
+  requestBody   String?   @map("request_body")
+  responseBody  String?   @map("response_body")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  processedAt   DateTime? @map("processed_at") @db.Timestamptz(6)
+
+  company Company        @relation(fields: [companyId], references: [id])
+  system  ExternalSystem @relation(fields: [systemId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, createdAt])
+  @@map("exchange_message")
+}
+
+/// Соответствие внешнего идентификатора нашему uid (ТЗ 12).
+///
+/// Обязательна, и это не предосторожность: коды номенклатуры в 1С и у нас не
+/// совпадут никогда. Уникальность в обе стороны — иначе повторный обмен
+/// заведёт второй код на ту же позицию, то есть ровно тот дубль, от которого
+/// карта и нужна.
+model ExternalRef {
+  id          BigInt   @id @default(autoincrement())
+  uid         String   @unique @default(uuid(7)) @db.Uuid
+  companyId   BigInt   @map("company_id")
+  systemId    BigInt   @map("system_id")
+  entityType  String   @map("entity_type")
+  externalId  String   @map("external_id")
+  internalUid String   @map("internal_uid") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  company Company        @relation(fields: [companyId], references: [id])
+  system  ExternalSystem @relation(fields: [systemId], references: [id], onDelete: Cascade)
+
+  @@unique([systemId, entityType, externalId])
+  @@unique([systemId, entityType, internalUid])
+  @@map("external_ref")
+}
+
+model Lead {
+  id           BigInt     @id @default(autoincrement())
+  uid          String     @unique @default(uuid(7)) @db.Uuid
+  companyId    BigInt     @map("company_id")
+  sourceId     BigInt?    @map("source_id")
+  name         String
+  phone        String?
+  email        String?
+  comment      String?
+  status       LeadStatus @default(new)
+  /// Почему ушёл: отдельно от комментария заявки — отчёт по причинам отказов
+  /// должен считать причину, а не пересказ разговора.
+  rejectReason String?    @map("reject_reason")
+  partnerId    BigInt?    @map("partner_id")
+  managerId    BigInt?    @map("manager_id")
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  /// Метки визита. `utm_*` и `source_id` — последнее касание, `first*` —
+  /// первое; первое после записи не меняется, иначе SEO теряет то, что привело
+  /// человека впервые.
+  visitorId       String?   @map("visitor_id")
+  landingUrl      String?   @map("landing_url")
+  referrer        String?
+  utmSource       String?   @map("utm_source")
+  utmMedium       String?   @map("utm_medium")
+  utmCampaign     String?   @map("utm_campaign")
+  utmContent      String?   @map("utm_content")
+  utmTerm         String?   @map("utm_term")
+  clickId         String?   @map("click_id")
+  analyticsId     String?   @map("analytics_id")
+  formCode        String?   @map("form_code")
+  firstAt         DateTime? @map("first_at") @db.Timestamptz(6)
+  firstSource     String?   @map("first_source")
+  firstMedium     String?   @map("first_medium")
+  firstCampaign   String?   @map("first_campaign")
+  firstLandingUrl String?   @map("first_landing_url")
+  firstReferrer   String?   @map("first_referrer")
+  firstSourceId   BigInt?   @map("first_source_id")
+
+  company        Company      @relation(fields: [companyId], references: [id])
+  source         LeadSource?  @relation(fields: [sourceId], references: [id])
+  firstSourceRef LeadSource?  @relation("LeadFirstSource", fields: [firstSourceId], references: [id])
+  partner        Partner?     @relation(fields: [partnerId], references: [id])
+  manager        UserAccount? @relation("LeadManager", fields: [managerId], references: [id])
+
+  @@index([companyId, status])
+  @@map("lead")
+}
+
+model DealStage {
+  id                 BigInt  @id @default(autoincrement())
+  uid                String  @unique @default(uuid(7)) @db.Uuid
+  companyId          BigInt  @map("company_id")
+  seq                Int
+  code               String
+  nameRu             String  @map("name_ru")
+  nameUz             String  @map("name_uz")
+  probabilityDefault Int     @default(0) @map("probability_default")
+  isFinal            Boolean @default(false) @map("is_final")
+  isActive           Boolean @default(true) @map("is_active")
+
+  company    Company          @relation(fields: [companyId], references: [id])
+  deals      Deal[]
+  eventsFrom DealStageEvent[] @relation("EventFrom")
+  eventsTo   DealStageEvent[] @relation("EventTo")
+
+  @@unique([companyId, code])
+  @@index([companyId, seq], map: "deal_stage_seq_idx")
+  @@map("deal_stage")
+}
+
+/// Причины проигрыша сделки (ТЗ 8.3): справочник, а не свободная строка —
+/// иначе отчёт по причинам отказов собирается из опечаток.
+model DealLostReason {
+  id        BigInt  @id @default(autoincrement())
+  uid       String  @unique @default(uuid(7)) @db.Uuid
+  companyId BigInt  @map("company_id")
+  code      String
+  nameRu    String  @map("name_ru")
+  nameUz    String  @map("name_uz")
+  isActive  Boolean @default(true) @map("is_active")
+
+  company Company @relation(fields: [companyId], references: [id])
+  deals   Deal[]
+
+  @@unique([companyId, code], map: "deal_lost_reason_company_code_key")
+  @@map("deal_lost_reason")
+}
+
+/// След переходов сделки по стадиям: без него конверсию считать не из чего.
+model DealStageEvent {
+  id          BigInt   @id @default(autoincrement())
+  dealId      BigInt   @map("deal_id")
+  fromStageId BigInt?  @map("from_stage_id")
+  toStageId   BigInt   @map("to_stage_id")
+  userId      BigInt?  @map("user_id")
+  at          DateTime @default(now()) @db.Timestamptz(6)
+
+  deal      Deal         @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  fromStage DealStage?   @relation("EventFrom", fields: [fromStageId], references: [id])
+  toStage   DealStage    @relation("EventTo", fields: [toStageId], references: [id])
+  user      UserAccount? @relation("DealEventUser", fields: [userId], references: [id])
+
+  @@index([dealId, at], map: "deal_stage_event_deal_idx")
+  @@index([toStageId, at], map: "deal_stage_event_to_idx")
+  @@map("deal_stage_event")
+}
+
+model Deal {
+  id                BigInt     @id @default(autoincrement())
+  uid               String     @unique @default(uuid(7)) @db.Uuid
+  companyId         BigInt     @map("company_id")
+  number            String
+  title             String
+  partnerId         BigInt?    @map("partner_id")
+  managerId         BigInt?    @map("manager_id")
+  stageId           BigInt     @map("stage_id")
+  amount            Decimal    @default(0) @db.Decimal(20, 4)
+  currencyId        BigInt     @map("currency_id")
+  probability       Int        @default(0)
+  expectedCloseDate DateTime?  @map("expected_close_date") @db.Date
+  status            DealStatus @default(open)
+  lostReasonId      BigInt?    @map("lost_reason_id")
+  closeComment      String?    @map("close_comment")
+  version           Int        @default(1)
+  createdAt         DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  closedAt          DateTime?  @map("closed_at") @db.Timestamptz(6)
+
+  company       Company          @relation(fields: [companyId], references: [id])
+  partner       Partner?         @relation(fields: [partnerId], references: [id])
+  manager       UserAccount?     @relation("DealManager", fields: [managerId], references: [id])
+  stage         DealStage        @relation(fields: [stageId], references: [id])
+  currency      Currency         @relation(fields: [currencyId], references: [id])
+  lostReason    DealLostReason?  @relation(fields: [lostReasonId], references: [id])
+  salesOrders   SalesOrder[]
+  events        DealStageEvent[]
+  crmTasks      CrmTask[]
+  crmActivities CrmActivity[]
+
+  @@unique([companyId, number])
+  @@index([companyId, stageId])
+  @@map("deal")
+}
+
+model CrmTask {
+  id          BigInt        @id @default(autoincrement())
+  uid         String        @unique @default(uuid(7)) @db.Uuid
+  companyId   BigInt        @map("company_id")
+  typeId      BigInt        @map("type_id")
+  title       String
+  description String?
+  dueAt       DateTime      @map("due_at") @db.Timestamptz(6)
+  assigneeId  BigInt        @map("assignee_id")
+  partnerId   BigInt?       @map("partner_id")
+  dealId      BigInt?       @map("deal_id")
+  status      CrmTaskStatus @default(open)
+  result      String?
+  version     Int           @default(1)
+  createdBy   BigInt?       @map("created_by")
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  closedAt    DateTime?     @map("closed_at") @db.Timestamptz(6)
+
+  company    Company       @relation(fields: [companyId], references: [id])
+  type       CrmTaskType   @relation(fields: [typeId], references: [id])
+  assignee   UserAccount   @relation("CrmTaskAssignee", fields: [assigneeId], references: [id])
+  author     UserAccount?  @relation("CrmTaskAuthor", fields: [createdBy], references: [id])
+  partner    Partner?      @relation(fields: [partnerId], references: [id])
+  deal       Deal?         @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  activities CrmActivity[]
+
+  @@index([companyId, status, dueAt], map: "crm_task_due_idx")
+  @@index([assigneeId, status, dueAt], map: "crm_task_assignee_idx")
+  @@index([partnerId, dueAt], map: "crm_task_partner_idx")
+  @@index([dealId, dueAt], map: "crm_task_deal_idx")
+  @@index([typeId], map: "crm_task_type_idx")
+  @@map("crm_task")
+}
+
+/// Типы задач (ТЗ 8.4) справочником, а не перечислением: «выезд на объект»
+/// заказчик должен заводить сам. `activityKind` обязателен — закрытая задача
+/// ложится активностью в ленту клиента, и тип задачи решает, какой именно.
+model CrmTaskType {
+  id           BigInt          @id @default(autoincrement())
+  uid          String          @unique @default(uuid(7)) @db.Uuid
+  companyId    BigInt          @map("company_id")
+  code         String
+  nameRu       String          @map("name_ru")
+  nameUz       String          @map("name_uz")
+  activityKind CrmActivityType @map("activity_kind")
+  seq          Int             @default(100)
+  isActive     Boolean         @default(true) @map("is_active")
+
+  company Company   @relation(fields: [companyId], references: [id])
+  tasks   CrmTask[]
+
+  @@unique([companyId, code], map: "crm_task_type_company_code_key")
+  @@index([companyId, seq], map: "crm_task_type_seq_idx")
+  @@map("crm_task_type")
+}
+
+model CrmActivity {
+  id          BigInt                @id @default(autoincrement())
+  uid         String                @unique @default(uuid(7)) @db.Uuid
+  companyId   BigInt                @map("company_id")
+  type        CrmActivityType
+  direction   CrmActivityDirection?
+  subject     String
+  note        String?
+  at          DateTime              @default(now()) @db.Timestamptz(6)
+  durationSec Int?                  @map("duration_sec")
+  partnerId   BigInt?               @map("partner_id")
+  dealId      BigInt?               @map("deal_id")
+  taskId      BigInt?               @map("task_id")
+  userId      BigInt?               @map("user_id")
+  createdAt   DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company Company      @relation(fields: [companyId], references: [id])
+  partner Partner?     @relation(fields: [partnerId], references: [id])
+  deal    Deal?        @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  task    CrmTask?     @relation(fields: [taskId], references: [id])
+  user    UserAccount? @relation("CrmActivityUser", fields: [userId], references: [id])
+
+  @@index([companyId, at], map: "crm_activity_feed_idx")
+  @@index([partnerId, at], map: "crm_activity_partner_idx")
+  @@index([dealId, at], map: "crm_activity_deal_idx")
+  @@map("crm_activity")
+}
+
+// ---------------------------------------------------------------------------
+// 8. Документы
+// ---------------------------------------------------------------------------
+
+model DocumentType {
+  id            BigInt       @id @default(autoincrement())
+  uid           String       @unique @default(uuid(7)) @db.Uuid
+  companyId     BigInt       @map("company_id")
+  code          String
+  nameRu        String       @map("name_ru")
+  nameUz        String       @map("name_uz")
+  numberingMask String       @default("{TYPE}-{YY}/{SEQ}") @map("numbering_mask")
+  counterScope  CounterScope @default(company_period) @map("counter_scope")
+  isActive      Boolean      @default(true) @map("is_active")
+
+  company   Company            @relation(fields: [companyId], references: [id])
+  documents Document[]
+  counters  DocumentCounter[]
+  templates DocumentTemplate[]
+
+  @@unique([companyId, code])
+  @@map("document_type")
+}
+
+model Document {
+  id             BigInt         @id @default(autoincrement())
+  uid            String         @unique @default(uuid(7)) @db.Uuid
+  companyId      BigInt         @map("company_id")
+  documentTypeId BigInt         @map("document_type_id")
+  number         String
+  documentDate   DateTime       @map("document_date") @db.Date
+  partnerId      BigInt?        @map("partner_id")
+  sourceDocType  String?        @map("source_doc_type")
+  sourceDocId    BigInt?        @map("source_doc_id")
+  currencyId     BigInt?        @map("currency_id")
+  amountNet      Decimal?       @map("amount_net") @db.Decimal(20, 4)
+  amountVat      Decimal?       @map("amount_vat") @db.Decimal(20, 4)
+  amountTotal    Decimal?       @map("amount_total") @db.Decimal(20, 4)
+  /// Снимок реквизитов на момент выписки: банк компании, адрес и ИНН
+  /// контрагента, срок и условия оплаты. Меняются со временем, а в
+  /// напечатанном документе обязаны остаться прежними.
+  requisites     Json?
+  locale         Locale         @default(ru)
+  status         DocumentStatus @default(draft)
+  version        Int            @default(1)
+  createdBy      BigInt?        @map("created_by")
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// Каким шаблоном документ напечатан. Ставится при первой сборке файла и
+  /// дальше не меняется: у прошлых документов остаётся та форма, которой они
+  /// ушли клиенту.
+  templateId     BigInt?        @map("template_id")
+  /// Готовый PDF: ключ в хранилище вложений, размер и версия, из которой собран.
+  pdfKey         String?        @map("pdf_key")
+  pdfSize        Int?           @map("pdf_size")
+  pdfBuiltAt     DateTime?      @map("pdf_built_at") @db.Timestamptz(6)
+  pdfVersion     Int?           @map("pdf_version")
+  /// Последнее движение по маршруту согласования: слова, время и кто.
+  statusComment  String?        @map("status_comment")
+  statusAt       DateTime?      @map("status_at") @db.Timestamptz(6)
+  statusBy       BigInt?        @map("status_by")
+
+  template     DocumentTemplate? @relation(fields: [templateId], references: [id])
+  company      Company           @relation(fields: [companyId], references: [id])
+  documentType DocumentType      @relation(fields: [documentTypeId], references: [id])
+  partner      Partner?          @relation(fields: [partnerId], references: [id])
+  currency     Currency?         @relation(fields: [currencyId], references: [id])
+  attachments  Attachment[]
+  lines        DocumentLine[]
+  versions     DocumentVersion[]
+
+  @@unique([companyId, documentTypeId, number])
+  @@index([companyId, documentDate(sort: Desc)])
+  @@map("document")
+}
+
+/// Выдача номера — UPDATE ... RETURNING под блокировкой строки в транзакции
+/// создания документа: два одновременных создания не получат один номер.
+model DocumentTemplate {
+  id             BigInt    @id @default(autoincrement())
+  uid            String    @unique @default(uuid(7)) @db.Uuid
+  companyId      BigInt    @map("company_id")
+  documentTypeId BigInt    @map("document_type_id")
+  locale         Locale
+  version        Int
+  fileName       String    @map("file_name")
+  fileSize       Int       @map("file_size")
+  content        Bytes
+  /// Теги, вычитанные из самого файла.
+  tags           Json      @default("[]")
+  /// Чужое имя тега → поле системы.
+  fieldMap       Json      @default("{}") @map("field_map")
+  isPublished    Boolean   @default(false) @map("is_published")
+  createdBy      BigInt?   @map("created_by")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  publishedAt    DateTime? @map("published_at") @db.Timestamptz(6)
+
+  company      Company           @relation(fields: [companyId], references: [id])
+  documentType DocumentType      @relation(fields: [documentTypeId], references: [id])
+  documents    Document[]
+  versions     DocumentVersion[]
+
+  @@unique([documentTypeId, locale, version])
+  @@map("document_template")
+}
+
+/// Предыдущая редакция документа: снимок на момент правки.
+model DocumentVersion {
+  id           BigInt         @id @default(autoincrement())
+  uid          String         @unique @default(uuid(7)) @db.Uuid
+  companyId    BigInt         @map("company_id")
+  documentId   BigInt         @map("document_id")
+  version      Int
+  status       DocumentStatus
+  documentDate DateTime       @map("document_date") @db.Date
+  locale       Locale
+  amountNet    Decimal?       @map("amount_net") @db.Decimal(20, 4)
+  amountVat    Decimal?       @map("amount_vat") @db.Decimal(20, 4)
+  amountTotal  Decimal?       @map("amount_total") @db.Decimal(20, 4)
+  requisites   Json?
+  /// Строки снимком: их печатают, а не ищут и не соединяют.
+  lines        Json           @default("[]")
+  templateId   BigInt?        @map("template_id")
+  pdfKey       String?        @map("pdf_key")
+  pdfSize      Int?           @map("pdf_size")
+  replacedBy   BigInt?        @map("replaced_by")
+  replacedAt   DateTime       @default(now()) @map("replaced_at") @db.Timestamptz(6)
+
+  company  Company           @relation(fields: [companyId], references: [id])
+  document Document          @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  template DocumentTemplate? @relation(fields: [templateId], references: [id])
+
+  @@unique([documentId, version])
+  @@map("document_version")
+}
+
+model DocumentLine {
+  id              BigInt  @id @default(autoincrement())
+  uid             String  @unique @default(uuid(7)) @db.Uuid
+  companyId       BigInt  @map("company_id")
+  documentId      BigInt  @map("document_id")
+  seq             Int
+  itemId          BigInt? @map("item_id")
+  itemCode        String? @map("item_code")
+  name            String
+  qty             Decimal @db.Decimal(20, 6)
+  unitCode        String  @map("unit_code")
+  unitName        String  @map("unit_name")
+  price           Decimal @default(0) @db.Decimal(20, 4)
+  discountPercent Decimal @default(0) @map("discount_percent") @db.Decimal(9, 4)
+  vatRate         Decimal @default(0) @map("vat_rate") @db.Decimal(9, 4)
+  amountNet       Decimal @default(0) @map("amount_net") @db.Decimal(20, 4)
+  amountVat       Decimal @default(0) @map("amount_vat") @db.Decimal(20, 4)
+  amountTotal     Decimal @default(0) @map("amount_total") @db.Decimal(20, 4)
+
+  company  Company  @relation(fields: [companyId], references: [id])
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  item     Item?    @relation(fields: [itemId], references: [id])
+
+  @@unique([documentId, seq])
+  @@map("document_line")
+}
+
+model DocumentCounter {
+  id             BigInt @id @default(autoincrement())
+  companyId      BigInt @map("company_id")
+  documentTypeId BigInt @map("document_type_id")
+  periodKey      String @map("period_key")
+  lastNumber     Int    @default(0) @map("last_number")
+
+  company      Company      @relation(fields: [companyId], references: [id])
+  documentType DocumentType @relation(fields: [documentTypeId], references: [id])
+
+  @@unique([companyId, documentTypeId, periodKey])
+  @@map("document_counter")
+}
+
+// ---------------------------------------------------------------------------
+// 9. Служебное
+// ---------------------------------------------------------------------------
+
+model OutboxEvent {
+  id            BigInt       @id @default(autoincrement())
+  companyId     BigInt       @map("company_id")
+  eventType     String       @map("event_type")
+  payload       Json
+  occurredAt    DateTime     @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  status        OutboxStatus @default(new)
+  attempts      Int          @default(0)
+  lastError     String?      @map("last_error")
+  nextAttemptAt DateTime?    @map("next_attempt_at") @db.Timestamptz(6)
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([status, nextAttemptAt])
+  @@map("outbox_event")
+}
+
+model IdempotencyKey {
+  key            String   @id
+  companyId      BigInt   @map("company_id")
+  userId         BigInt?  @map("user_id")
+  endpoint       String
+  requestHash    String   @map("request_hash")
+  responseStatus Int      @map("response_status")
+  responseBody   Json     @map("response_body")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  expiresAt      DateTime @map("expires_at") @db.Timestamptz(6)
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([expiresAt])
+  @@map("idempotency_key")
+}
+
+// ---------------------------------------------------------------------------
+// Перечисления
+// ---------------------------------------------------------------------------
+
+/// Вложение к операции: фото, скан, сертификат качества партии (ТЗ 5.4, 5.6, 6.3).
+/// Байты лежат на диске по `storageKey`, в базе только описание. Владелец —
+/// ровно одна из трёх ссылок, это держит ограничение `attachment_one_owner`.
+model Attachment {
+  id                 BigInt         @id @default(autoincrement())
+  uid                String         @unique @default(uuid(7)) @db.Uuid
+  companyId          BigInt         @map("company_id")
+  stockMoveId        BigInt?        @map("stock_move_id")
+  batchId            BigInt?        @map("batch_id")
+  financeOperationId BigInt?        @map("finance_operation_id")
+  productionOrderId  BigInt?        @map("production_order_id")
+  productionStageId  BigInt?        @map("production_stage_id")
+  documentId         BigInt?        @map("document_id")
+  partnerId          BigInt?        @map("partner_id")
+  kind               AttachmentKind @default(other)
+  fileName           String         @map("file_name")
+  mimeType           String         @map("mime_type")
+  sizeBytes          Int            @map("size_bytes")
+  sha256             String         @db.Char(64)
+  storageKey         String         @unique @map("storage_key")
+  comment            String?
+  createdBy          BigInt?        @map("created_by")
+  createdAt          DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company          Company           @relation(fields: [companyId], references: [id])
+  stockMove        StockMove?        @relation(fields: [stockMoveId], references: [id], onDelete: Cascade)
+  batch            Batch?            @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  financeOperation FinanceOperation? @relation(fields: [financeOperationId], references: [id], onDelete: Cascade)
+  productionOrder  ProductionOrder?  @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+  productionStage  ProductionStage?  @relation(fields: [productionStageId], references: [id], onDelete: Cascade)
+  document         Document?         @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  partner          Partner?          @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@index([stockMoveId])
+  @@index([batchId])
+  @@index([financeOperationId])
+  @@index([productionOrderId])
+  @@index([productionStageId], map: "attachment_production_stage_idx")
+  @@index([documentId])
+  @@index([partnerId], map: "attachment_partner_idx")
+  @@map("attachment")
+}
+
+enum Locale {
+  ru
+  uz
+}
+
+enum RoleScope {
+  all
+  department
+  warehouse
+  own
+}
+
+enum AuditSource {
+  web
+  mobile
+  bot
+  integration
+  system
+}
+
+enum UnitKind {
+  weight
+  length
+  piece
+  volume
+}
+
+enum ItemType {
+  raw
+  goods
+  component
+  semi
+  finished
+}
+
+enum PartnerType {
+  company
+  person
+}
+
+/// ТЗ 5.7: FIFO по партиям или средневзвешенная себестоимость по складу.
+enum CostingMethod {
+  fifo
+  weighted_average
+}
+
+enum SerialState {
+  in_stock
+  in_production
+  shipped
+  written_off
+}
+
+enum ReasonKind {
+  write_off
+  downtime
+  defect
+  /// Отход техпроцесса: обрезь, стружка, окалина. Не брак — это норма, но
+  /// названная причина нужна, чтобы отход можно было разобрать по видам.
+  waste
+  inventory
+}
+
+enum OperationType {
+  receipt
+  transfer
+  issue_to_production
+  return_from_production
+  shipment
+  return_from_client
+  write_off
+  surplus
+  output
+}
+
+enum ReservationStatus {
+  active
+  released
+  consumed
+}
+
+/// Путь листа инвентаризации: собран → считают → расхождения видны →
+/// утверждён. Отменённый лист остаётся в истории: пересчёт был, и то, что его
+/// бросили, тоже факт.
+enum InventoryStatus {
+  draft
+  counting
+  review
+  approved
+  cancelled
+}
+
+/// Что делать с операциями по зоне, пока идёт пересчёт (ТЗ 5.8). Выбирается
+/// при создании листа: на складе, который не может встать, операции помечают,
+/// на складе, где важна точность, — запрещают.
+enum InventoryBlockMode {
+  block
+  mark
+}
+
+/// Чем печатать код на этикетке (ТЗ 5.9). Code 128 читает любой линейный
+/// сканер и занимает полосу; QR влезает в мелкую этикетку и берётся телефоном.
+enum LabelSymbology {
+  code128
+  qr
+}
+
+enum TechCardStatus {
+  draft
+  active
+  archived
+}
+
+enum ProductionStatus {
+  draft
+  planned
+  in_progress
+  paused
+  produced
+  closed
+  cancelled
+}
+
+enum StageStatus {
+  pending
+  running
+  paused
+  done
+  skipped
+}
+
+enum StageEvent {
+  start
+  pause
+  resume
+  finish
+}
+
+enum OutputKind {
+  good
+  defect
+  waste
+  semi
+}
+
+enum DeviationKind {
+  downtime
+  overuse
+  defect
+  delay
+}
+
+enum PriceTypeKind {
+  retail
+  wholesale
+  contract
+  cash
+  cashless
+}
+
+/// Что делать с продажей дешевле себестоимости (ТЗ 9.2).
+enum BelowCostMode {
+  block
+  approve
+}
+
+/// Откуда взялась цена в строке заказа.
+enum PriceSource {
+  list
+  partner
+  manual
+}
+
+enum OrderStatus {
+  draft
+  confirmed
+  reserved
+  in_production
+  picking
+  shipped
+  closed
+  cancelled
+}
+
+enum PaymentStatus {
+  unpaid
+  partial
+  paid
+}
+
+enum ShipmentStatus {
+  none
+  partial
+  full
+}
+
+enum AccountKind {
+  cash
+  bank
+  receivable
+  payable
+  income
+  expense
+  vat
+  transit
+}
+
+enum CashflowDirection {
+  inflow
+  outflow
+}
+
+enum CashflowActivity {
+  operating
+  investing
+  financing
+}
+
+enum FinanceOpType {
+  income
+  expense
+  transfer
+  conversion
+}
+
+enum FinanceStatus {
+  draft
+  pending_approval
+  approved
+  posted
+  rejected
+  reversed
+}
+
+enum LeadChannel {
+  site
+  ads
+  call
+  manual
+  telegram
+  other
+}
+
+enum LeadStatus {
+  new
+  qualified
+  converted
+  rejected
+}
+
+enum DealStatus {
+  open
+  won
+  lost
+}
+
+enum CrmTaskStatus {
+  open
+  done
+  cancelled
+}
+
+enum CrmActivityType {
+  call
+  meeting
+  letter
+  note
+}
+
+enum CrmActivityDirection {
+  incoming
+  outgoing
+}
+
+enum CounterScope {
+  company
+  company_period
+}
+
+enum DocumentStatus {
+  draft
+  pending_approval
+  approved
+  signed
+  returned
+  cancelled
+}
+
+enum OutboxStatus {
+  new
+  processing
+  done
+  failed
+}
+
+enum AttachmentKind {
+  photo
+  scan
+  certificate
+  other
+}
+
+/// Заявка на сброс пароля: система пароль не рассылает, администратор выдаёт.
+model PasswordResetRequest {
+  id          BigInt    @id @default(autoincrement())
+  uid         String    @unique @default(uuid(7)) @db.Uuid
+  login       String
+  contact     String
+  note        String?
+  userId      BigInt?   @map("user_id")
+  status      String    @default("new")
+  handledBy   BigInt?   @map("handled_by")
+  handledAt   DateTime? @map("handled_at") @db.Timestamptz(6)
+  handledNote String?   @map("handled_note")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user    UserAccount? @relation("ResetRequestUser", fields: [userId], references: [id])
+  handler UserAccount? @relation("ResetRequestHandler", fields: [handledBy], references: [id])
+
+  @@index([status, createdAt])
+  @@map("password_reset_request")
+}
+
+/// Журнал резервных копий базы: когда, сколько шла, сколько весит, чем кончилась.
+///
+/// Строка заводится до запуска `pg_dump` и закрывается после: упавший процесс
+/// иначе не оставил бы следа, а «копия не делалась» и «копия упала» — разные
+/// новости. RLS нет: копия — вся база целиком, делить её по компаниям нечего.
+model DbBackup {
+  id          BigInt    @id @default(autoincrement())
+  uid         String    @unique @default(uuid(7)) @db.Uuid
+  /// running → ok | failed.
+  status      String    @default("running")
+  /// `schedule` — по расписанию, `manual` — кнопкой.
+  source      String    @default("schedule")
+  startedAt   DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt  DateTime? @map("finished_at") @db.Timestamptz(6)
+  durationMs  Int?      @map("duration_ms")
+  fileName    String    @map("file_name")
+  sizeBytes   BigInt?   @map("size_bytes")
+  sha256      String?
+  error       String?
+  startedBy   BigInt?   @map("started_by")
+
+  starter UserAccount? @relation("DbBackupStarter", fields: [startedBy], references: [id], onDelete: SetNull)
+
+  @@index([startedAt(sort: Desc)])
+  @@index([status, startedAt(sort: Desc)])
+  @@map("db_backup")
+}

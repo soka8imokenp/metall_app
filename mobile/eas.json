@@ -1,0 +1,12 @@
+{
+  "cli": { "version": ">= 16.0.0" },
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "android": { "buildType": "apk" },
+      "ios": { "simulator": true },
+      "env": { "EXPO_PUBLIC_API_URL": "https://metall-asia.cloudplus.uz/api/v1" }
+    },
+    "production": { "autoIncrement": true }
+  }
+}

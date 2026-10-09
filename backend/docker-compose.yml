@@ -1,0 +1,35 @@
+name: metall-asia
+
+services:
+  postgres:
+    image: postgres:18
+    container_name: metall-asia-postgres
+    restart: unless-stopped
+    environment:
+      # Суперпользователь контейнера. Приложение им НЕ ходит: суперпользователь
+      # молча обходит политики RLS, и на дев-стенде это незаметно.
+      # Пароль читает entrypoint от root — поэтому файл 600 ему доступен.
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_super
+      POSTGRES_DB: metall_asia
+      TZ: Asia/Tashkent
+      PGTZ: UTC
+    ports:
+      # Порт 5433 на cloudplus-an закреплён за METALL ASIA (согласовано с Боссом).
+      # Только петлевой интерфейс: наружу база не торчит.
+      - '127.0.0.1:5433:5432'
+    volumes:
+      # В postgres:18 том монтируется на /var/lib/postgresql, а не на .../data:
+      # данные ложатся в подкаталог, и pg_upgrade --link не упирается в границу
+      # точки монтирования. Со старым путём образ отказывается стартовать.
+      - pgdata:/var/lib/postgresql
+      - ${HOME}/.local/state/openclaw/secrets/metall-asia-pg-super:/run/secrets/pg_super:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d metall_asia']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  pgdata:
+    name: metall-asia-pgdata

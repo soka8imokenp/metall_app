@@ -1,0 +1,6 @@
+{
+  "name": "METALL ASIA — Enterprise ERP/MES Dashboard",
+  "description": "Единая система управления ООО «METALL ASIA»: производство, склад, продажи, финансы, CRM и документы.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
