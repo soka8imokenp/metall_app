@@ -1,5 +1,8 @@
 import { Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
-import { readFileSync } from 'node:fs';
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync } from 'node:fs';
+import { join } from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { say } from '../common/say.js';
 
 /**
@@ -24,9 +27,14 @@ export interface Release {
   notes: string;
   publishedAt: string;
   size: number;
-  assetId: number;
+  /** Откуда качать: вложение релиза GitHub или файл в ветке `releases`. */
+  assetId: number | null;
   assetName: string;
+  rawUrl: string | null;
 }
+
+/** Ветка с последним выпуском: `latest.json` и сам APK (см. mobile/scripts/release.sh). */
+export const RELEASES_BRANCH = 'releases';
 
 /** Как часто спрашиваем GitHub: телефоны проверяют при каждом запуске, GitHub — раз в 5 минут. */
 const CACHE_MS = 5 * 60_000;
@@ -73,8 +81,11 @@ export class UpdatesService {
         signal: AbortSignal.timeout(10_000),
       });
       if (res.status === 404) {
-        this.cache = { at: Date.now(), release: null };
-        return null;
+        // Релизов GitHub нет — смотрим ветку выпусков, её пишет скрипт по git.
+        const branch = await this.fromBranch();
+        this.cache = { at: Date.now(), release: branch };
+        if (branch) void this.prefetch(branch);
+        return branch;
       }
       if (!res.ok) throw new Error(`GitHub ${res.status}`);
       const json = (await res.json()) as {
@@ -86,9 +97,10 @@ export class UpdatesService {
       const apk = json.assets.find((a) => a.name.toLowerCase().endsWith('.apk'));
       const version = json.tag_name.replace(/^v/i, '');
       const release = apk && /^\d+\.\d+\.\d+$/.test(version)
-        ? { version, notes: (json.body ?? '').slice(0, 4000), publishedAt: json.published_at, size: apk.size, assetId: apk.id, assetName: apk.name }
+        ? { version, notes: (json.body ?? '').slice(0, 4000), publishedAt: json.published_at, size: apk.size, assetId: apk.id, assetName: apk.name, rawUrl: null }
         : null;
       this.cache = { at: Date.now(), release };
+      if (release) void this.prefetch(release);
       return release;
     } catch (e) {
       this.log.warn(`релизы GitHub: ${(e as Error).message}`);
@@ -98,20 +110,106 @@ export class UpdatesService {
   }
 
   /**
+   * Выпуск из ветки `releases`: скрипт кладёт туда `latest.json` и APK и
+   * отправляет по git (SSH-ключом разработчика), без ключа к API GitHub.
+   * Ветка каждый раз переписывается целиком — в ней только последний выпуск,
+   * репозиторий не разрастается от старых APK.
+   */
+  private async fromBranch(): Promise<Release | null> {
+    const base = `https://raw.githubusercontent.com/${this.repo}/${RELEASES_BRANCH}`;
+    // Описание выпуска — через API, а не через raw: CDN raw держит у себя ответ
+    // «не найдено» минутами, и свежий выпуск был бы не виден. Сам APK — через
+    // raw, у API ограничение на размер файла.
+    const res = await fetch(`https://api.github.com/repos/${this.repo}/contents/latest.json?ref=${RELEASES_BRANCH}`, {
+      headers: this.headers('application/vnd.github.raw+json'),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`ветка выпусков: ${res.status}`);
+    const m = (await res.json()) as { version?: string; notes?: string; publishedAt?: string; size?: number; file?: string };
+    if (!m.version || !/^\d+\.\d+\.\d+$/.test(m.version) || !m.file || !/^[\w.-]+\.apk$/.test(m.file)) return null;
+    return {
+      version: m.version,
+      notes: (m.notes ?? '').slice(0, 4000),
+      publishedAt: m.publishedAt ?? '',
+      size: Number(m.size ?? 0),
+      assetId: null,
+      assetName: m.file,
+      rawUrl: `${base}/${m.file}`,
+    };
+  }
+
+  // --- копия APK на сервере ------------------------------------------------
+
+  /**
+   * APK держим у себя: GitHub отдаёт 60 МБ минуту-полторы, а телефон в цеху
+   * не должен столько ждать при каждом обновлении. Сервер качает новый выпуск
+   * сам, как только его увидел, и дальше раздаёт по локальной сети.
+   */
+  private get dir(): string {
+    return process.env.UPDATES_DIR || join(process.cwd(), 'var', 'updates');
+  }
+
+  private fileOf(release: Release): string {
+    return join(this.dir, `MetallAsia-${release.version}.apk`);
+  }
+
+  /** Готова ли копия: файл есть и размер совпадает с объявленным. */
+  cached(release: Release): string | null {
+    const f = this.fileOf(release);
+    try {
+      return existsSync(f) && statSync(f).size === release.size ? f : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private fetching = new Set<string>();
+
+  async prefetch(release: Release): Promise<void> {
+    // в прогонах тестов ничего на диск не качаем
+    if (process.env.VITEST || this.cached(release) || this.fetching.has(release.version)) return;
+    this.fetching.add(release.version);
+    const final = this.fileOf(release);
+    const part = `${final}.part`;
+    try {
+      mkdirSync(this.dir, { recursive: true });
+      const res = await fetch(this.urlOf(release), { headers: this.headers('application/octet-stream'), redirect: 'follow' });
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+      await pipeline(Readable.fromWeb(res.body as any), createWriteStream(part));
+      if (statSync(part).size !== release.size) throw new Error('размер не совпал');
+      renameSync(part, final);
+      this.log.log(`выпуск ${release.version} скачан на сервер`);
+    } catch (e) {
+      this.log.warn(`копия выпуска ${release.version}: ${(e as Error).message}`);
+      try { unlinkSync(part); } catch { /* нечего убирать */ }
+    } finally {
+      this.fetching.delete(release.version);
+    }
+  }
+
+  private urlOf(release: Release): string {
+    return release.rawUrl ?? `https://api.github.com/repos/${this.repo}/releases/assets/${release.assetId}`;
+  }
+
+  /**
    * Сам APK потоком. GitHub отвечает переадресацией на подписанную ссылку
    * хранилища; ключ туда не уходит (fetch не переносит заголовок
    * авторизации на чужой адрес).
    */
-  async download(): Promise<{ release: Release; body: ReadableStream<Uint8Array> }> {
+  async download(): Promise<{ release: Release; body: NodeJS.ReadableStream }> {
     const release = await this.latest();
     if (!release) throw new NotFoundException(say('Обновлений нет', 'Yangilanish yo‘q'));
-    const res = await fetch(`https://api.github.com/repos/${this.repo}/releases/assets/${release.assetId}`, {
+    const local = this.cached(release);
+    if (local) return { release, body: createReadStream(local) };
+    // Копии ещё нет (выпуск только что вышел) — отдаём прямо с GitHub.
+    const res = await fetch(this.urlOf(release), {
       headers: this.headers('application/octet-stream'),
       redirect: 'follow',
     });
     if (!res.ok || !res.body) {
       throw new ServiceUnavailableException(say('Не удалось получить файл обновления', 'Yangilanish faylini olib bo‘lmadi'));
     }
-    return { release, body: res.body };
+    return { release, body: Readable.fromWeb(res.body as any) };
   }
 }

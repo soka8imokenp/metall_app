@@ -24,6 +24,11 @@ const cors = (req) => ({
 
 http
   .createServer((req, res) => {
+    // Журнал запросов: кто, что и с каким ответом — так видно, доходит ли телефон.
+    if (process.env.PROXY_LOG !== 'off') {
+      const t0 = Date.now();
+      res.on('finish', () => console.log(`${new Date().toISOString().slice(11, 19)} ${req.socket.remoteAddress} ${req.method} ${req.url} → ${res.statusCode} ${Date.now() - t0}ms`));
+    }
     if (req.method === 'OPTIONS') {
       res.writeHead(204, cors(req));
       return res.end();

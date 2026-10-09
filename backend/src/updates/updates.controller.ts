@@ -1,6 +1,5 @@
 import { Controller, Get, Res } from '@nestjs/common';
 import type { Response } from 'express';
-import { Readable } from 'node:stream';
 import { Public } from '../auth/auth.guard.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { UpdatesService } from './updates.service.js';
@@ -43,6 +42,6 @@ export class UpdatesController {
     res.setHeader('Content-Length', String(release.size));
     res.setHeader('Content-Disposition', `attachment; filename="MetallAsia-${release.version}.apk"`);
     res.setHeader('Cache-Control', 'no-store');
-    Readable.fromWeb(body as any).pipe(res);
+    body.pipe(res);
   }
 }

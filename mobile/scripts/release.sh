@@ -7,14 +7,11 @@
 #   1. ставит версию в app.json (и versionCode для Android — из номера версии);
 #   2. собирает APK в Docker с ограничением памяти и ядер (ПК не виснет);
 #   3. кладёт копию в ../../builds/;
-#   4. создаёт релиз v<версия> в репозитории и прикладывает к нему APK.
+#   4. публикует выпуск в ветку `releases` репозитория по git (SSH-ключ
+#      разработчика) — без ключа к API GitHub и без браузера.
 #
-# Телефоны узнают о релизе от сервера (`GET /mobile/update`), сервер — от GitHub.
-#
-# Ключ GitHub (Contents: Read and write) в файле $GITHUB_TOKEN_FILE — тогда
-# релиз создаётся и APK загружается сам. Без ключа скрипт собирает APK и
-# пишет, как выложить его на сайте. Репозиторий публичный — серверу, чтобы
-# видеть релизы, ключ не нужен.
+# Телефоны узнают о выпуске от сервера (`GET /mobile/update`), сервер читает
+# `latest.json` из ветки `releases` (репозиторий публичный, ключ не нужен).
 set -euo pipefail
 # APK собирается под эту версию API; серверу ключ GitHub не нужен (репозиторий публичный).
 
@@ -23,14 +20,10 @@ NOTES="${2:-}"
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "версия: три числа через точку" >&2; exit 1; }
 
 REPO="${GITHUB_RELEASES_REPO:-soka8imokenp/metall_app}"
-TOKEN_FILE="${GITHUB_TOKEN_FILE:-$HOME/.local/state/openclaw/secrets/github-metall-app-token}"
 API_URL="${RELEASE_API_URL:-http://192.168.1.165:4001/api/v1}"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$HERE/../../builds/MetallAsia-$VERSION-arm64.apk"
 
-# Без ключа скрипт только собирает APK, а релиз создаётся руками на сайте.
-TOKEN=""
-[ -r "$TOKEN_FILE" ] && TOKEN="$(cat "$TOKEN_FILE")"
 
 cd "$HERE"
 
@@ -64,28 +57,26 @@ mkdir -p "$(dirname "$OUT")"
 cp android/app/build/outputs/apk/release/app-release.apk "$OUT"
 echo "→ APK: $OUT ($(du -h "$OUT" | cut -f1))"
 
-if [ -z "$TOKEN" ]; then
-  cat <<MSG
-✓ APK собран. Ключа GitHub нет — создайте релиз на сайте:
-  1. https://github.com/$REPO/releases/new
-  2. Tag: v$VERSION  (Create new tag)
-  3. Описание — что нового (его увидят в окне обновления)
-  4. Перетащите файл: $OUT
-  5. Publish release
-Телефоны увидят обновление в течение 5 минут.
-MSG
-  exit 0
-fi
-
-echo "→ релиз v$VERSION в $REPO"
-BODY="$(node -e 'console.log(JSON.stringify({tag_name: "v" + process.argv[1], name: "METALL ASIA " + process.argv[1], body: process.argv[2] || "", draft: false, prerelease: false}))' "$VERSION" "$NOTES")"
-RELEASE="$(curl -sS -f -X POST "https://api.github.com/repos/$REPO/releases" \
-  -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
-  -d "$BODY")"
-RID="$(node -e 'console.log(JSON.parse(process.argv[1]).id)' "$RELEASE")"
-
-curl -sS -f -X POST "https://uploads.github.com/repos/$REPO/releases/$RID/assets?name=MetallAsia-$VERSION.apk" \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/vnd.android.package-archive" \
-  --data-binary @"$OUT" >/dev/null
-
-echo "✓ готово: телефоны увидят обновление $VERSION в течение 5 минут"
+echo "→ публикация в ветку releases ($REPO, по git/SSH)"
+# Ветка переписывается целиком: в ней только последний выпуск — latest.json
+# и APK. Старые APK в истории не копятся, репозиторий не разрастается.
+PUB="$(mktemp -d)"
+trap 'rm -rf "$PUB"' EXIT
+FILE="MetallAsia-$VERSION.apk"
+cp "$OUT" "$PUB/$FILE"
+node -e '
+  const fs = require("fs");
+  const [v, notes, file, size] = process.argv.slice(1);
+  fs.writeFileSync(process.argv[5] + "/latest.json", JSON.stringify({
+    version: v, notes, file, size: Number(size), publishedAt: new Date().toISOString(),
+  }, null, 2) + "\n");
+' "$VERSION" "$NOTES" "$FILE" "$(stat -c %s "$OUT")" "$PUB"
+(
+  cd "$PUB"
+  git init -q -b releases
+  git add -A
+  git -c user.name="$(git -C "$HERE" config user.name || echo release)" -c user.email="$(git -C "$HERE" config user.email || echo release@localhost)" \
+    commit -q -m "Выпуск $VERSION"
+  git push -q -f "git@github.com:$REPO.git" releases:releases
+)
+echo "✓ готово: выпуск $VERSION опубликован, телефоны увидят его в течение 5 минут"

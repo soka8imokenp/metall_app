@@ -60,6 +60,18 @@ describe('последний релиз', () => {
     expect((await s.latest())?.version).toBe('0.8.0');
   });
 
+  it('нет релизов GitHub — берёт выпуск из ветки releases', async () => {
+    process.env.GITHUB_RELEASES_REPO = 'owner/repo';
+    const f = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) =>
+      String(url).includes('/releases/latest')
+        ? new Response('{}', { status: 404 })
+        : new Response(JSON.stringify({ version: '0.8.1', notes: 'Тест', size: 123, file: 'MetallAsia-0.8.1.apk' }), { status: 200 }),
+    );
+    const r = await new UpdatesService().latest();
+    expect(r).toMatchObject({ version: '0.8.1', size: 123, rawUrl: 'https://raw.githubusercontent.com/owner/repo/releases/MetallAsia-0.8.1.apk' });
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+
   it('нет релизов (404) — обновлений нет', async () => {
     process.env.GITHUB_RELEASES_REPO = 'owner/repo';
     mockFetch(404, { message: 'Not Found' });
