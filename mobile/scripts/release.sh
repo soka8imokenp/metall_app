@@ -11,10 +11,12 @@
 #
 # Телефоны узнают о релизе от сервера (`GET /mobile/update`), сервер — от GitHub.
 #
-# Нужно: ключ GitHub с правом записи в репозиторий (Contents: Read and write)
-# в файле $GITHUB_TOKEN_FILE (по умолчанию ниже), права 600. В репозитории
-# должен быть хотя бы один коммит: релиз вешается на ветку.
+# Ключ GitHub (Contents: Read and write) в файле $GITHUB_TOKEN_FILE — тогда
+# релиз создаётся и APK загружается сам. Без ключа скрипт собирает APK и
+# пишет, как выложить его на сайте. Репозиторий публичный — серверу, чтобы
+# видеть релизы, ключ не нужен.
 set -euo pipefail
+# APK собирается под эту версию API; серверу ключ GitHub не нужен (репозиторий публичный).
 
 VERSION="${1:?укажите версию, например 0.8.0}"
 NOTES="${2:-}"
@@ -26,8 +28,9 @@ API_URL="${RELEASE_API_URL:-http://192.168.1.165:4001/api/v1}"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$HERE/../../builds/MetallAsia-$VERSION-arm64.apk"
 
-[ -r "$TOKEN_FILE" ] || { echo "нет файла с ключом GitHub: $TOKEN_FILE" >&2; exit 1; }
-TOKEN="$(cat "$TOKEN_FILE")"
+# Без ключа скрипт только собирает APK, а релиз создаётся руками на сайте.
+TOKEN=""
+[ -r "$TOKEN_FILE" ] && TOKEN="$(cat "$TOKEN_FILE")"
 
 cd "$HERE"
 
@@ -60,6 +63,19 @@ nice -n 15 docker run --rm --cpuset-cpus 0-2 --memory 4g --memory-swap 4g \
 mkdir -p "$(dirname "$OUT")"
 cp android/app/build/outputs/apk/release/app-release.apk "$OUT"
 echo "→ APK: $OUT ($(du -h "$OUT" | cut -f1))"
+
+if [ -z "$TOKEN" ]; then
+  cat <<MSG
+✓ APK собран. Ключа GitHub нет — создайте релиз на сайте:
+  1. https://github.com/$REPO/releases/new
+  2. Tag: v$VERSION  (Create new tag)
+  3. Описание — что нового (его увидят в окне обновления)
+  4. Перетащите файл: $OUT
+  5. Publish release
+Телефоны увидят обновление в течение 5 минут.
+MSG
+  exit 0
+fi
 
 echo "→ релиз v$VERSION в $REPO"
 BODY="$(node -e 'console.log(JSON.stringify({tag_name: "v" + process.argv[1], name: "METALL ASIA " + process.argv[1], body: process.argv[2] || "", draft: false, prerelease: false}))' "$VERSION" "$NOTES")"
