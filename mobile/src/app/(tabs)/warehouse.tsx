@@ -4,11 +4,13 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@/ui/Icon';
 import { useQueryClient } from '@tanstack/react-query';
 import { ListScreen } from '@/ui/ListScreen';
-import { Badge, Button, Card, KV, Divider, IconButton, Tabs, SearchBar, Appear } from '@/ui/components';
+import { Badge, Button, Card, KV, Divider, Field, IconButton, Tabs, SearchBar, Appear } from '@/ui/components';
 import { Sheet } from '@/ui/Sheet';
 import { Text } from '@/ui/Text';
 import { Pressable } from '@/ui/Pressable';
 import { MoveSheet, MoveInit, MOVE_LABEL } from '@/components/warehouse/MoveSheet';
+import { NewInventorySheet } from '@/components/warehouse/NewInventorySheet';
+import { useAction } from '@/api/action';
 import { useApi } from '@/api/query';
 import { useAuth } from '@/auth/AuthProvider';
 import { useI18n } from '@/i18n';
@@ -31,6 +33,10 @@ export default function Warehouse() {
   const [critical, setCritical] = useState(false);
   const [detail, setDetail] = useState<any | null>(null);
   const [move, setMove] = useState<MoveInit | null>(null);
+  const [newSheet, setNewSheet] = useState(false);
+  const [moveDetail, setMoveDetail] = useState<any | null>(null);
+  const [revNote, setRevNote] = useState('');
+  const rev = useAction();
   const q = useDebounced(search, 350);
 
   // пришли со сканера: подставить поиск или сразу открыть операцию
@@ -67,6 +73,11 @@ export default function Warehouse() {
         value={tab}
         onChange={setTab}
       />
+      {tab === 'inventory' && can('warehouse.inventory') && (
+        <View style={{ paddingHorizontal: 20, marginBottom: 16 }}>
+          <Button title={t('whNewSheet')} icon="plus" variant="secondary" needsNetwork onPress={() => setNewSheet(true)} />
+        </View>
+      )}
       {tab === 'stock' && (
         <>
           <SearchBar value={search} onChange={setSearch} placeholder={t('search')} />
@@ -115,7 +126,7 @@ export default function Warehouse() {
               <StockRow r={r} onPress={() => setDetail(r)} />
             </>
           ) : tab === 'moves' ? (
-            <MoveRow r={r} />
+            <MoveRow r={r} onPress={() => { rev.reset(); setRevNote(''); setMoveDetail(r); }} />
           ) : (
             <SheetRow r={r} onPress={() => router.push(`/inventory/${r.uid}`)} />
           )
@@ -150,6 +161,44 @@ export default function Warehouse() {
       </Sheet>
 
       <MoveSheet visible={!!move} init={move ?? undefined} onClose={() => setMove(null)} />
+      <NewInventorySheet visible={newSheet} onClose={() => setNewSheet(false)} />
+
+      <Sheet visible={!!moveDetail} onClose={() => setMoveDetail(null)} title={moveDetail ? t(MOVE_LABEL[moveDetail.operationType] ?? 'whMove') : ''}>
+        {moveDetail && (
+          <>
+            <Text variant="headline">{pick(moveDetail.item, 'name')}</Text>
+            <Card>
+              <KV k={t('whQty')} v={`${num(moveDetail.qty, 3)} ${u(moveDetail.item?.unit)}`} strong />
+              {!!moveDetail.batch?.number && <KV k={t('whBatch')} v={moveDetail.batch.number} />}
+              {!!moveDetail.fromWarehouse && <KV k={t('whFrom')} v={`${pick(moveDetail.fromWarehouse, 'name')}${moveDetail.fromLocation ? ` · ${moveDetail.fromLocation}` : ''}`} />}
+              {!!moveDetail.toWarehouse && <KV k={t('whTo')} v={`${pick(moveDetail.toWarehouse, 'name')}${moveDetail.toLocation ? ` · ${moveDetail.toLocation}` : ''}`} />}
+              <Divider />
+              <KV k={t('whAuthor')} v={moveDetail.author ?? '—'} />
+              <KV k={t('date')} v={dateTime(moveDetail.movedAt)} />
+              {!!moveDetail.docNumber && <KV k={t('whDoc')} v={moveDetail.docNumber} />}
+              {!!moveDetail.comment && <Text variant="callout" tone="secondary" style={{ marginTop: 6 }}>{moveDetail.comment}</Text>}
+            </Card>
+            {moveDetail.reversed && <Badge label={t('whReversed')} tone="neutral" />}
+            {moveDetail.canReverse && canMove && !moveDetail.reversed && (
+              <>
+                <Field label={`${t('whComment')} (${t('whOptional')})`} value={revNote} onChangeText={setRevNote} multiline style={{ height: 70 }} />
+                {!!rev.error && <Text variant="callout" tone="danger">{rev.error}</Text>}
+                <Button
+                  title={t('whReverseConfirm')}
+                  icon="corner-up-left"
+                  variant="danger"
+                  needsNetwork
+                  loading={rev.busy}
+                  onPress={async () => {
+                    const r = await rev.run('POST', `/warehouse/moves/${moveDetail.uid}/reverse`, { comment: revNote.trim() || undefined }, { success: t('whReversed') });
+                    if (r) setMoveDetail(null);
+                  }}
+                />
+              </>
+            )}
+          </>
+        )}
+      </Sheet>
     </>
   );
 }
@@ -178,14 +227,14 @@ function StockRow({ r, onPress }: { r: any; onPress: () => void }) {
   );
 }
 
-function MoveRow({ r }: { r: any }) {
+function MoveRow({ r, onPress }: { r: any; onPress: () => void }) {
   const { pick, t } = useI18n();
   const { colors } = useTheme();
   const incoming = ['receipt', 'surplus', 'return_from_client', 'return_from_production'].includes(r.operationType);
   const transfer = r.operationType === 'transfer';
   const icon = transfer ? 'repeat' : incoming ? 'arrow-down-left' : 'arrow-up-right';
   return (
-    <Card style={{ flexDirection: 'row', gap: 12, alignItems: 'center', opacity: r.reversed ? 0.5 : 1 }}>
+    <Card onPress={onPress} style={{ flexDirection: 'row', gap: 12, alignItems: 'center', opacity: r.reversed ? 0.5 : 1 }}>
       <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: colors.muted, alignItems: 'center', justifyContent: 'center' }}>
         <Feather name={icon as any} size={18} color={transfer ? colors.text : incoming ? colors.success : colors.danger} />
       </View>

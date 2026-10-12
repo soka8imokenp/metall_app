@@ -3,7 +3,7 @@ import {
   ArrowDownLeft, ArrowRight, ArrowUpRight, Bell, Briefcase, Building2, Camera, CameraOff, Check, ChevronDown, ChevronLeft, ChevronRight,
   ChevronsRight, CircleAlert, CircleCheck, CirclePlus, CircleX, Clock, CornerUpLeft, CreditCard, DollarSign, Eye, EyeOff, File, FileText,
   House, Image as ImageIcon, Inbox, Info, Layers, LayoutGrid, LogOut, Moon, Package, PenLine, Play, Plus, QrCode, Repeat, ScanLine, Search, Send,
-  Delete, Download, Fingerprint, Globe, Lock, RefreshCw, ScanFace, Settings, ShoppingBag, SquareCheck, Sun, Trash2, TrendingDown, TrendingUp, TriangleAlert, Truck, Wrench, WifiOff, X, Zap,
+  Delete, Download, Fingerprint, Globe, Lock, RefreshCw, ScanFace, Settings, ShoppingBag, SquareCheck, Sun, Trash2, TrendingDown, TrendingUp, TriangleAlert, Truck, Wrench, Users, Shield, Smartphone, History, LockOpen, UserX, UserCheck, CopyPlus, WifiOff, X, Zap,
   type LucideIcon,
 } from 'lucide-react-native';
 
@@ -74,6 +74,14 @@ const MAP = {
   x: X,
   'x-circle': CircleX,
   zap: Zap,
+  users: Users,
+  shield: Shield,
+  smartphone: Smartphone,
+  history: History,
+  unlock: LockOpen,
+  'user-x': UserX,
+  'user-check': UserCheck,
+  versions: CopyPlus,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof MAP;

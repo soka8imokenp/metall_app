@@ -33,6 +33,7 @@ export default function OrderDetail() {
   const [status, setStatus] = useState(false);
   const [mat, setMat] = useState<any | null>(null);
   const [matQty, setMatQty] = useState('');
+  const [note, setNote] = useState('');
 
   const o = q.data;
   const manage = can('production.manage');
@@ -42,13 +43,13 @@ export default function OrderDetail() {
 
   const register = async () => {
     if (!qtyOk) return;
-    const r = await act.run('POST', `/production/orders/${uid}/output`, { kind, qty: qty.trim().replace(',', '.'), reasonUid: reason ?? undefined }, { success: t('prDone2') });
-    if (r) { setOut(false); setQty(''); setReason(null); }
+    const r = await act.run('POST', `/production/orders/${uid}/output`, { kind, qty: qty.trim().replace(',', '.'), reasonUid: reason ?? undefined, comment: note.trim() || undefined }, { success: t('prDone2') });
+    if (r) { setOut(false); setQty(''); setReason(null); setNote(''); }
   };
   const useMat = async () => {
     if (!/^\d+([.,]\d{1,6})?$/.test(matQty.trim())) return;
-    const r = await act.run('POST', `/production/orders/${uid}/materials/use`, { itemCode: mat.itemCode, qty: matQty.trim().replace(',', '.') }, { success: t('prDone2') });
-    if (r) { setMat(null); setMatQty(''); }
+    const r = await act.run('POST', `/production/orders/${uid}/materials/use`, { itemCode: mat.itemCode, qty: matQty.trim().replace(',', '.'), comment: note.trim() || undefined }, { success: t('prDone2') });
+    if (r) { setMat(null); setMatQty(''); setNote(''); }
   };
 
   return (
@@ -128,7 +129,8 @@ export default function OrderDetail() {
                   <View style={{ padding: 14, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                     <View style={{ gap: 2 }}>
                       <Badge label={x.kind === 'good' ? t('prGood') : x.kind === 'defect' ? t('prDefect') : x.kind === 'waste' ? t('prWaste') : x.kind} tone={x.kind === 'good' ? 'success' : x.kind === 'defect' ? 'danger' : 'warning'} />
-                      <Text variant="caption" tone="secondary">{dateShort(x.occurredAt)}</Text>
+                      <Text variant="caption" tone="secondary">{dateShort(x.occurredAt)}{x.reasonNameRu ? ` · ${pick(x, 'reasonName')}` : ''}</Text>
+                      {!!x.comment && <Text variant="caption" tone="muted" numberOfLines={2}>{x.comment}</Text>}
                     </View>
                     <Text variant="callout" num style={{ fontWeight: '700' }}>{num(x.qty, 3)} {unit(x.unit)}</Text>
                   </View>
@@ -147,6 +149,7 @@ export default function OrderDetail() {
             {kind !== 'good' && (
               <PickerField label={t('prReason')} value={reason} options={(reasons ?? []).map((r: any) => ({ value: r.uid, label: pick(r, 'name') }))} onChange={setReason} />
             )}
+            <Field label={`${t('whComment')} (${t('whOptional')})`} value={note} onChangeText={setNote} multiline style={{ height: 80 }} />
             {!!act.error && <Text tone="danger" variant="callout">{act.error}</Text>}
             <Button title={t('confirm')} needsNetwork loading={act.busy} disabled={!qtyOk} onPress={register} />
           </Sheet>
@@ -165,6 +168,7 @@ export default function OrderDetail() {
               <>
                 <Text variant="headline">{pick(mat, 'itemName')}</Text>
                 <Field label={`${t('whQty')}, ${unit(mat.unit)}`} value={matQty} onChangeText={setMatQty} keyboardType="decimal-pad" autoFocus />
+                <Field label={`${t('whComment')} (${t('whOptional')})`} value={note} onChangeText={setNote} multiline style={{ height: 80 }} />
                 {!!act.error && <Text tone="danger" variant="callout">{act.error}</Text>}
                 <Button title={t('confirm')} needsNetwork loading={act.busy} onPress={useMat} />
               </>

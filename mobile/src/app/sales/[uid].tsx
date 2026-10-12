@@ -6,6 +6,7 @@ import { Badge, Button, Card, Divider, ErrorState, Field, KV, Screen, Section, S
 import { Sheet } from '@/ui/Sheet';
 import { PickerField } from '@/ui/Picker';
 import { Text } from '@/ui/Text';
+import { Pressable } from '@/ui/Pressable';
 import { useApi } from '@/api/query';
 import { useAction } from '@/api/action';
 import { useAuth } from '@/auth/AuthProvider';
@@ -23,6 +24,11 @@ export default function OrderDetail() {
   const qc = useQueryClient();
   const q = useApi<any>(`/sales/orders/${uid}`);
   const av = useApi<any>(`/sales/orders/${uid}/availability`);
+  // Резервы склада по этому заказу: сервер фильтрует по товару, номер заказа сверяем здесь.
+  const resv = useApi<{ rows: any[] }>('/warehouse/reservations', { limit: 200 });
+  const [rsLine, setRsLine] = useState<any | null>(null);
+  const [rsBatch, setRsBatch] = useState<string | null>(null);
+  const [rsQty, setRsQty] = useState('');
   const finRefs = useApi<any>('/finance/refs', undefined, { staleTime: 5 * 60_000, enabled: can('finance.post') });
   const act = useAction();
   const [statusOpen, setStatusOpen] = useState(false);
@@ -116,12 +122,71 @@ export default function OrderDetail() {
                           {t('slAvailable')}: {num(a.availableQty, 3)}{short ? ` · ${t('slShortage')}: ${num(a.shortage, 3)}` : ''} · {t('slRemaining')}: {num(a.remainingQty, 3)}
                         </Text>
                       )}
+                      {/* резервы этой позиции и кнопка «Резерв» */}
+                      {(resv.data?.rows ?? []).filter((r) => r.orderNumber === o.number && r.item?.code === l.itemCode).map((r) => (
+                        <View key={r.uid} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                          <Badge label={`${t('slReserved')} ${num(r.qty, 3)} ${unit(l.unit)}${r.batch ? ` · ${r.batch}` : ''}`} tone="info" />
+                          {edit && (
+                            <Pressable onPress={() => act.run('DELETE', `/warehouse/reservations/${r.uid}`, undefined, { success: t('slReleased') })} haptic>
+                              <Text variant="caption" tone="danger" style={{ fontWeight: '700' }}>{t('slRelease')}</Text>
+                            </Pressable>
+                          )}
+                        </View>
+                      ))}
+                      {edit && a && Number(a.remainingQty) > 0 && !['shipped', 'closed', 'cancelled'].includes(o.status) && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          icon="package"
+                          title={t('slReserve')}
+                          style={{ alignSelf: 'flex-start', marginTop: 6 }}
+                          needsNetwork
+                          onPress={() => { act.reset(); setRsLine({ ...a, unit: l.unit, itemCode: l.itemCode, name: pick(l, 'itemName') }); setRsBatch(null); setRsQty(String(Number(a.remainingQty))); }}
+                        />
+                      )}
                     </View>
                   </View>
                 );
               })}
             </Card>
           </Section>
+
+          <Sheet visible={!!rsLine} onClose={() => setRsLine(null)} title={t('slReserveBatch')}>
+            {rsLine && (
+              <>
+                <Text variant="headline">{rsLine.name}</Text>
+                {(rsLine.batches ?? []).length === 0 ? (
+                  <Text tone="secondary">{t('slNoBatches')}</Text>
+                ) : (
+                  <PickerField
+                    label={t('whBatch')}
+                    value={rsBatch}
+                    options={(rsLine.batches ?? []).map((b: any) => ({ value: b.number, label: b.number, hint: `${t('slAvailable')}: ${num(b.availableQty, 3)} ${unit(rsLine.unit)}` }))}
+                    onChange={setRsBatch}
+                  />
+                )}
+                <Field label={`${t('whQty')}, ${unit(rsLine.unit)}`} value={rsQty} onChangeText={setRsQty} keyboardType="decimal-pad" />
+                {!!act.error && <Text tone="danger" variant="callout">{act.error}</Text>}
+                <Button
+                  title={t('confirm')}
+                  needsNetwork
+                  loading={act.busy}
+                  disabled={!rsBatch || !/^\d+([.,]\d{1,6})?$/.test(rsQty.trim())}
+                  onPress={async () => {
+                    const r = await act.run('POST', '/warehouse/reservations', {
+                      companyUid: o.enterpriseUid,
+                      itemCode: rsLine.itemCode,
+                      batchNumber: rsBatch,
+                      warehouseCode: rsLine.warehouseCode,
+                      qty: rsQty.trim().replace(',', '.'),
+                      salesOrderNumber: o.number,
+                    }, { success: t('slReserveDone') });
+                    if (r) setRsLine(null);
+                  }}
+                />
+              </>
+            )}
+          </Sheet>
 
           <Sheet visible={statusOpen} onClose={() => setStatusOpen(false)} title={t('slNextStatus')}>
             {nexts.map((s) => (

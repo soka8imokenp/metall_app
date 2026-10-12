@@ -80,6 +80,7 @@ function Menu({ onNavigate }: { onNavigate: () => void }) {
     { icon: 'home', label: t('tabHome'), to: '/(tabs)', key: 'index' },
     ...mods.map((k) => ({ icon: MODULES[k].icon as IconName, label: t(MODULES[k].label), to: `/(tabs)/${k}`, key: k })),
     ...(can('warehouse.view') ? [{ icon: 'maximize' as IconName, label: t('whScan'), to: '/scan', key: 'scan' }] : []),
+    ...(can('admin.users') || can('settings.edit') ? [{ icon: 'shield' as IconName, label: t('admin'), to: '/admin', key: 'admin' }] : []),
   ];
   const last = segs[segs.length - 1];
   const current = segs.includes('(tabs)') ? (last === '(tabs)' ? 'index' : last) : '';

@@ -5,7 +5,7 @@ import { useEffect } from 'react';
 import { Feather } from '@/ui/Icon';
 import { useQueryClient } from '@tanstack/react-query';
 import { ListScreen } from '@/ui/ListScreen';
-import { Badge, Card, IconButton, Segmented, SearchBar, Appear } from '@/ui/components';
+import { Badge, Card, IconButton, Segmented, SearchBar, Tabs } from '@/ui/components';
 import { Text } from '@/ui/Text';
 import { Pressable } from '@/ui/Pressable';
 import { NewOrderSheet } from '@/components/sales/NewOrderSheet';
@@ -14,7 +14,7 @@ import { useAuth } from '@/auth/AuthProvider';
 import { useI18n } from '@/i18n';
 import { useTheme } from '@/theme/ThemeProvider';
 import { useDebounced } from '@/lib/hooks';
-import { dateShort, money, moneyParts } from '@/lib/format';
+import { dateShort, dateTime, money, moneyParts, num } from '@/lib/format';
 import { PAY_TONE, SALES_STATUS_TONE } from '@/lib/status';
 
 type Stage = 'all' | 'unpaid' | 'paid' | 'production' | 'shipped';
@@ -42,19 +42,42 @@ export function OrderRow({ r, onPress }: { r: any; onPress: () => void }) {
   );
 }
 
+function ShipmentRow({ r, onPress }: { r: any; onPress: () => void }) {
+  const { t, pick } = useI18n();
+  const { colors } = useTheme();
+  return (
+    <Card onPress={onPress} style={{ gap: 6 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Text variant="headline">{r.number}</Text>
+        <Text variant="caption" tone="secondary">{dateTime(r.shippedAt)}</Text>
+      </View>
+      <Text variant="callout" numberOfLines={1}>{pick(r, 'partnerName')}</Text>
+      <Text variant="caption" tone="secondary" numberOfLines={2}>{pick(r, 'cargo')}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
+        <Feather name="truck" size={14} color={colors.textSecondary} />
+        <Text variant="caption" tone="secondary" style={{ flex: 1 }}>{[r.orderNumber, pick(r, 'warehouseName'), r.vehicle, r.driver].filter(Boolean).join(' · ')}</Text>
+      </View>
+      {r.netWeightT != null && <View style={{ flexDirection: 'row' }}><Badge label={`${t('slNet')} ${num(r.netWeightT)} т`} tone="neutral" /></View>}
+    </Card>
+  );
+}
+
 export default function Sales() {
   const { t } = useI18n();
   const { colors } = useTheme();
   const { can } = useAuth();
   const router = useRouter();
   const qc = useQueryClient();
+  const [mode, setMode] = useState<'orders' | 'shipments'>('orders');
   const [stage, setStage] = useState<Stage>('all');
   const [search, setSearch] = useState('');
   const [create, setCreate] = useState(false);
   const q = useDebounced(search, 350);
   const params = useLocalSearchParams<{ new?: string }>();
   useEffect(() => { if (params.new) setCreate(true); }, [params.new]);
-  const orders = useApi<any[]>('/sales/orders', { stage, search: q || undefined, limit: 60 });
+  const orders = useApi<any[]>('/sales/orders', { stage, search: q || undefined, limit: 60 }, { enabled: mode === 'orders' });
+  const ships = useApi<any[]>('/sales/shipments', { search: q || undefined, limit: 60 }, { enabled: mode === 'shipments' });
+  const list = mode === 'orders' ? orders : ships;
 
   const sum = useApi<any>('/sales/summary');
   const pf = sum.data?.portfolio;
@@ -67,7 +90,10 @@ export default function Sales() {
 
   const header = (
     <View>
-      <Segmented
+      <View style={{ paddingHorizontal: 20, paddingBottom: 12 }}>
+        <Tabs options={[{ value: 'orders', label: t('slOrdersTab') }, { value: 'shipments', label: t('slShipmentsTab') }]} value={mode} onChange={setMode} />
+      </View>
+      {mode === 'orders' && <Segmented
         options={[
           { value: 'all', label: t('slStAll') },
           { value: 'unpaid', label: t('slStUnpaid') },
@@ -77,7 +103,7 @@ export default function Sales() {
         ]}
         value={stage}
         onChange={setStage}
-      />
+      />}
       <SearchBar value={search} onChange={setSearch} placeholder={t('search')} />
     </View>
   );
@@ -91,21 +117,23 @@ export default function Sales() {
         }
         header={header}
         metrics={metrics}
-        animKey={stage}
-        data={orders.data}
+        animKey={`${mode}-${stage}`}
+        data={list.data}
         keyExtractor={(r) => r.uid}
-        loading={orders.isLoading}
-        error={orders.error?.message}
-        onRetry={() => orders.refetch()}
+        loading={list.isLoading}
+        error={list.error?.message}
+        onRetry={() => list.refetch()}
         onRefresh={() => qc.invalidateQueries({ queryKey: ['api'] })}
-        refreshing={orders.isRefetching}
-        emptyTitle={t('slNoOrders')}
-        emptyIcon="shopping-bag"
-        renderItem={(r, i) => (
-          <>
+        refreshing={list.isRefetching}
+        emptyTitle={mode === 'orders' ? t('slNoOrders') : t('slNoShipments')}
+        emptyIcon={mode === 'orders' ? 'shopping-bag' : 'truck'}
+        renderItem={(r) =>
+          mode === 'orders' ? (
             <OrderRow r={r} onPress={() => router.push(`/sales/${r.uid}`)} />
-          </>
-        )}
+          ) : (
+            <ShipmentRow r={r} onPress={() => r.orderUid && router.push(`/sales/${r.orderUid}`)} />
+          )
+        }
       />
       <NewOrderSheet visible={create} onClose={() => setCreate(false)} onCreated={(uid) => uid && router.push(`/sales/${uid}`)} />
     </>

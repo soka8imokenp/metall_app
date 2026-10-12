@@ -74,7 +74,10 @@ export default function Finance() {
       <ListScreen<any>
         title={t('tabFinance')}
         right={
-          can('finance.post') ? <IconButton name="plus" solid onPress={() => setCreate(true)} /> : undefined
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+              <IconButton name="layers" onPress={() => router.push('/finance/reports')} />
+              {can('finance.post') && <IconButton name="plus" solid onPress={() => setCreate(true)} />}
+            </View>
         }
         header={header}
         metrics={metrics}

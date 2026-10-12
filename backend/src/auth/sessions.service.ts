@@ -3,6 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { say } from '../common/say.js';
 import { ERR } from '../common/error-codes.js';
+import { currentContext } from '../common/request-context.js';
 
 /**
  * Сессии входа (02-ARCHITECTURE 7.1, контракт §2).
@@ -152,8 +153,11 @@ export class SessionsService {
         },
       }),
     );
+    const own = currentContext()?.sessionUid ?? null;
     return rows.map((r) => ({
       uid: r.uid,
+      // сессия, из которой смотрят список: её закрытие — это выход
+      current: r.uid === own,
       client: r.client as Client,
       createdAt: r.createdAt,
       lastUsedAt: r.lastUsedAt,

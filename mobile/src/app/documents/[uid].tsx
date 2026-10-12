@@ -5,12 +5,14 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Badge, Button, Card, Divider, ErrorState, Field, KV, Screen, Section, Skeleton } from '@/ui/components';
 import { Sheet } from '@/ui/Sheet';
 import { Text } from '@/ui/Text';
+import { PhotoStrip } from '@/components/Photos';
+import { useAuth } from '@/auth/AuthProvider';
 import { useApi } from '@/api/query';
 import { useAction } from '@/api/action';
 import { useToast } from '@/ui/Toast';
 import { useI18n } from '@/i18n';
 import { useTheme } from '@/theme/ThemeProvider';
-import { dateShort, money, num } from '@/lib/format';
+import { dateShort, dateTime, money, num } from '@/lib/format';
 import { DOC_STATUS } from '@/lib/status';
 import { openRemoteFile } from '@/lib/files';
 import { useOnline } from '@/lib/network';
@@ -27,7 +29,10 @@ export default function DocumentDetail() {
   const qc = useQueryClient();
   const toast = useToast();
   const online = useOnline();
+  const { can } = useAuth();
   const q = useApi<any>(`/documents/${uid}`);
+  const hist = useApi<{ rows: any[] }>(`/documents/${uid}/history`);
+  const vers = useApi<{ current: number; rows: any[] }>(`/documents/${uid}/versions`);
   const act = useAction();
   const [ask, setAsk] = useState<string | null>(null);
   const [comment, setComment] = useState('');
@@ -41,11 +46,12 @@ export default function DocumentDetail() {
     if (r) setAsk(null);
   };
 
-  const open = async (format: 'pdf' | 'docx') => {
+  const open = async (format: 'pdf' | 'docx', version?: number) => {
     if (!online) return toast.show(t('needsNetwork'), 'error');
     setOpening(true);
     try {
-      await openRemoteFile(`/documents/${uid}/file?format=${format}`, `${d.number}.${format}`);
+      const path = version ? `/documents/${uid}/versions/${version}/file?format=${format}` : `/documents/${uid}/file?format=${format}`;
+      await openRemoteFile(path, `${d.number}${version ? `-v${version}` : ''}.${format}`);
     } catch {
       toast.show(t('dcOpenFail'), 'error');
     } finally {
@@ -112,6 +118,71 @@ export default function DocumentDetail() {
                   </View>
                 </View>
               ))}
+            </Card>
+          </Section>
+
+          <Section title={t('dcScans')}>
+            <PhotoStrip owner="document" uid={d.uid ?? uid} canEdit={can('documents.edit')} />
+          </Section>
+
+          {!!vers.data?.rows?.length && (
+            <Section title={t('dcVersions')}>
+              <Card padded={false}>
+                <View style={{ padding: 14, flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <Text variant="callout" style={{ fontWeight: '600' }}>{t('dcVersionN')} {vers.data.current}</Text>
+                  <Badge label={t('dcCurrent')} tone="success" />
+                </View>
+                {vers.data.rows.map((v: any) => {
+                  const [vk, vt] = DOC_STATUS[v.status] ?? ['dcStDraft', 'neutral'];
+                  return (
+                    <View key={v.uid}>
+                      <View style={{ height: 1, backgroundColor: colors.border }} />
+                      <View style={{ padding: 14, gap: 6 }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Text variant="callout" style={{ fontWeight: '600' }}>{t('dcVersionN')} {v.version}</Text>
+                          <Badge label={t(vk as any)} tone={vt as any} />
+                        </View>
+                        <Text variant="caption" tone="secondary" num>
+                          {money(v.amountTotal, d.currency)} · {v.linesCount} · {[v.author, dateTime(v.replacedAt)].filter(Boolean).join(' · ')}
+                        </Text>
+                        {can('documents.edit') && (v.hasPdf || v.hasTemplate) && (
+                          <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
+                            {v.hasPdf && <Button style={{ flex: 1 }} size="sm" variant="secondary" icon="file" title={t('dcPdf')} loading={opening} needsNetwork onPress={() => open('pdf', v.version)} />}
+                            {v.hasTemplate && <Button style={{ flex: 1 }} size="sm" variant="secondary" icon="file-text" title={t('dcDocx')} loading={opening} needsNetwork onPress={() => open('docx', v.version)} />}
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })}
+              </Card>
+            </Section>
+          )}
+
+          <Section title={t('dcHistory')}>
+            <Card padded={false}>
+              {!hist.data?.rows?.length ? (
+                <Text variant="callout" tone="secondary" style={{ padding: 14 }}>{hist.isLoading ? '…' : t('dcNoHistory')}</Text>
+              ) : (
+                hist.data.rows.map((h: any, i: number) => {
+                  const st = h.changes?.status?.to as string | undefined;
+                  const label = (t as any)(`dcH${h.action}`);
+                  const comment = h.changes?.comment?.to as string | undefined;
+                  return (
+                    <View key={`${h.at}-${i}`}>
+                      {i > 0 && <View style={{ height: 1, backgroundColor: colors.border }} />}
+                      <View style={{ padding: 14, gap: 4 }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                          <Text variant="callout" style={{ fontWeight: '600', flex: 1 }}>{label && !label.startsWith('dcH') ? label : h.action}</Text>
+                          {!!st && DOC_STATUS[st] && <Badge label={t(DOC_STATUS[st][0])} tone={DOC_STATUS[st][1]} />}
+                        </View>
+                        <Text variant="caption" tone="secondary">{[h.user, dateTime(h.at)].filter(Boolean).join(' · ')}</Text>
+                        {!!comment && <Text variant="caption">{comment}</Text>}
+                      </View>
+                    </View>
+                  );
+                })
+              )}
             </Card>
           </Section>
 
