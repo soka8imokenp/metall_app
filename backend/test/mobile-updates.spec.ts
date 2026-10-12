@@ -53,10 +53,12 @@ describe('последний релиз', () => {
     const s = new UpdatesService();
     mockFetch(200, release());
     await s.latest();
-    // кэш на 5 минут: состарим его, чтобы второй вызов пошёл в GitHub
+    // кэш на 5 минут: состарим его — ответ сразу из кэша, GitHub в фоне
     (s as any).cache.at = 0;
     vi.restoreAllMocks();
     mockFetch(502, {});
+    expect((await s.latest())?.version).toBe('0.8.0');
+    await (s as any).refreshing;
     expect((await s.latest())?.version).toBe('0.8.0');
   });
 

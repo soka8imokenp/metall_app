@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
 import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -40,8 +40,13 @@ export const RELEASES_BRANCH = 'releases';
 const CACHE_MS = 5 * 60_000;
 
 @Injectable()
-export class UpdatesService {
+export class UpdatesService implements OnModuleInit {
   private readonly log = new Logger('updates');
+
+  /** Узнать о выпуске при запуске сервера, а не на первом запросе телефона. */
+  onModuleInit() {
+    if (!process.env.VITEST && this.repo) void this.refresh();
+  }
   private cache: { at: number; release: Release | null } | null = null;
 
   private get repo(): string | null {
@@ -74,7 +79,24 @@ export class UpdatesService {
   /** Последний релиз с APK. Ошибка GitHub не роняет запуск приложения: «обновлений нет». */
   async latest(): Promise<Release | null> {
     if (!this.repo) return null;
-    if (this.cache && Date.now() - this.cache.at < CACHE_MS) return this.cache.release;
+    if (this.cache) {
+      // Отвечаем сразу тем, что знаем, а GitHub спрашиваем в фоне: телефон не
+      // должен ждать GitHub (это бывало до 10 секунд) при каждой проверке.
+      if (Date.now() - this.cache.at >= CACHE_MS) void this.refresh();
+      return this.cache.release;
+    }
+    return this.refresh();
+  }
+
+  private refreshing: Promise<Release | null> | null = null;
+
+  /** Спросить GitHub; одновременные вызовы делят один запрос. */
+  private refresh(): Promise<Release | null> {
+    if (!this.refreshing) this.refreshing = this.fetchLatest().finally(() => { this.refreshing = null; });
+    return this.refreshing;
+  }
+
+  private async fetchLatest(): Promise<Release | null> {
     try {
       const res = await fetch(`https://api.github.com/repos/${this.repo}/releases/latest`, {
         headers: this.headers('application/vnd.github+json'),
