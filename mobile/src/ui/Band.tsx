@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { StyleSheet, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,6 +10,9 @@ import { BrandWordmark } from './Brand';
 import { useTheme } from '@/theme/ThemeProvider';
 import { useDrawer } from './Drawer';
 import { PipeRings } from './Steel';
+import { ScopeTitle } from './CompanySwitch';
+import { EASE_OUT } from './motion';
+import { useAuth } from '@/auth/AuthProvider';
 
 export const OnBandCtx = React.createContext(false);
 
@@ -40,6 +44,15 @@ export function Band({
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const drawer = useDrawer();
+  // смена компании: сечение трубы на шапке поворачивается — видно, что данные другие
+  const { companyKey } = useAuth();
+  const spin = useSharedValue(0);
+  const firstKey = useRef(true);
+  useEffect(() => {
+    if (firstKey.current) { firstKey.current = false; return; }
+    spin.value = withTiming(spin.value + 1, { duration: 700, easing: EASE_OUT });
+  }, [companyKey, spin]);
+  const ringSpin = useAnimatedStyle(() => ({ transform: [{ rotate: `${spin.value * 120}deg` }, { scale: 1 + Math.sin((spin.value % 1) * Math.PI) * 0.08 }] }));
   // у корневых экранов шапка всегда с показателями: пока они грузятся — прочерки, высота та же
   if (!back && !metrics) metrics = [{ label: ' ', value: '—' }, { label: ' ', value: '—' }];
   return (
@@ -62,16 +75,25 @@ export function Band({
         }}
       />
       {/* сечение трубы в изоляции — фирменный знак продукции, едва заметно */}
-      <PipeRings size={210} color="#ffffff" opacity={0.08} style={{ right: -54, top: Math.max(insets.top, 14) - 6 }} />
+      <Animated.View pointerEvents="none" style={[{ position: 'absolute', right: -54, top: Math.max(insets.top, 14) - 6, width: 210, height: 210 }, ringSpin]}>
+        <PipeRings size={210} color="#ffffff" opacity={0.08} style={{ left: 0, top: 0 }} />
+      </Animated.View>
       {/* мягкий блик сверху, чтобы красный не был плоским */}
       <LinearGradient colors={['rgba(255,255,255,0.12)', 'rgba(255,255,255,0)']} style={[StyleSheet.absoluteFill, { height: 120 }]} pointerEvents="none" />
 
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 44 }}>
         {back ? <BandButton name="chevron-left" onPress={back} /> : <BandButton name="grid" onPress={drawer.toggle} />}
-        {wordmark ? (
-          <BrandWordmark height={12} color="#fff" />
-        ) : (
+        {back ? (
           <Text variant="label" style={{ color: 'rgba(255,255,255,0.9)', letterSpacing: 1.8, textTransform: 'uppercase', fontWeight: '700', flex: 1, textAlign: 'center' }} numberOfLines={1}>{title}</Text>
+        ) : (
+          // на главных экранах заголовок — ещё и выбор компании (касание / свайп)
+          <ScopeTitle>
+            {wordmark ? (
+              <BrandWordmark height={12} color="#fff" />
+            ) : (
+              <Text variant="label" style={{ color: 'rgba(255,255,255,0.9)', letterSpacing: 1.8, textTransform: 'uppercase', fontWeight: '700', textAlign: 'center' }} numberOfLines={1}>{title}</Text>
+            )}
+          </ScopeTitle>
         )}
         <OnBandCtx.Provider value={true}>
           <View style={{ flexDirection: 'row', gap: 8, minWidth: 42, justifyContent: 'flex-end' }}>{right}</View>

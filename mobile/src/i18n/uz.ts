@@ -499,4 +499,13 @@ export const uz: Dict = {
   rvAvg: 'Kunlik o‘rtacha',
   rvVsPrev: 'oldingi davrga',
   rvHint: 'Grafik bo‘ylab barmoq yuriting yoki kunga teging',
+  coTitle: 'Kompaniya',
+  coHint: 'Tanlovga barcha bo‘limlar bog‘liq: ombor, sex, moliya, sotuv va hujjatlar.',
+  coAll: 'Ikkala kompaniya',
+  coAllSub: 'Guruh bo‘yicha jamlangan',
+  coTrade: 'Metall Asia',
+  coTradeSub: 'Savdo, omborlar va sotuv',
+  coPlant: 'Quvur zavodi',
+  coPlantSub: 'PPU izolyatsiyali quvurlar ishlab chiqarish',
+  coSwipeHint: 'Tez: sarlavha bo‘ylab chapga yoki o‘ngga suring',
 };

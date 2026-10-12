@@ -88,8 +88,8 @@ export default function Home() {
   const act2 = can('finance.post') ? quick('payment') : can('warehouse.move') && act1?.label !== t('opReceipt') ? quick('receipt') : undefined;
   const metrics: Metric[] | undefined = k.length >= 2
     ? [
-        { label: k[0].key === 'revenue' ? t('kpiRevenue') : pick(k[0], 'title'), value: num(k[0].value, 1), sub: k[0].unit, action: act1 },
-        { label: k[1].key.includes('ship') ? t('kpiShipped') : pick(k[1], 'title'), value: num(k[1].value, 1), sub: k[1].unit, action: act2 },
+        { label: k[0].key === 'revenue' ? t('kpiRevenue') : pick(k[0], 'title'), value: num(k[0].value, 1), sub: `${k[0].unit} · 30 ${t('rvDays')}`, action: act1 },
+        { label: k[1].key.includes('ship') ? t('kpiShipped') : pick(k[1], 'title'), value: num(k[1].value, 1), sub: `${k[1].unit} · 30 ${t('rvDays')}`, action: act2 },
       ]
     : undefined;
 

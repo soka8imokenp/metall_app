@@ -13,6 +13,7 @@ import { useI18n } from '@/i18n';
 import { Band, Body, Metric, OnBandCtx } from './Band';
 import { SteelSurface, splitStyle } from './Steel';
 import { useFocusEffect } from 'expo-router';
+import { useAuth } from '@/auth/AuthProvider';
 
 export const TAB_BAR_SPACE = 104;
 
@@ -231,10 +232,12 @@ export function ContentSheet({ children, animKey }: { children: React.ReactNode;
       tick.value = tick.value + 1;
     }, [p, tick]),
   );
+  // смена вкладки-фильтра или компании — карточки собираются заново
+  const { companyKey } = useAuth();
   useEffect(() => {
     if (firstKey.current) { firstKey.current = false; return; }
     tick.value = tick.value + 1;
-  }, [animKey, tick]);
+  }, [animKey, companyKey, tick]);
   const move = useAnimatedStyle(() => ({ transform: [{ translateY: (1 - p.value) * 14 }] }));
   return (
     <RevealTick.Provider value={tick}>

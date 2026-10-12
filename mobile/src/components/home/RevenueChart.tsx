@@ -140,7 +140,7 @@ export function RevenueChart({ days }: { days: Day[] }) {
             {delta !== null && (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                 <Feather name={up ? 'trending-up' : 'trending-down'} size={15} color={up ? colors.success : colors.danger} />
-                <Text variant="callout" num style={{ fontWeight: '700', color: up ? colors.success : colors.danger }}>{up ? '+' : '−'}{Math.abs(Math.round(delta * 100))}%</Text>
+                <Text variant="callout" num style={{ fontWeight: '700', color: up ? colors.success : colors.danger }}>{up ? '+' : '−'}{total > 0 ? Math.min(99, Math.abs(Math.round(delta * 100))) : 100}%</Text>
                 <Text variant="caption" tone="muted">{t('rvVsPrev')}</Text>
               </View>
             )}
