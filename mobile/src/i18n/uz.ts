@@ -497,4 +497,6 @@ export const uz: Dict = {
   rvNoSales: 'Sotuv bo‘lmagan',
   rvTotal: 'Jami',
   rvAvg: 'Kunlik o‘rtacha',
+  rvVsPrev: 'oldingi davrga',
+  rvHint: 'Grafik bo‘ylab barmoq yuriting yoki kunga teging',
 };

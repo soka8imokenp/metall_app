@@ -500,6 +500,8 @@ export const ru = {
   rvNoSales: 'Продаж не было',
   rvTotal: 'Итого',
   rvAvg: 'Среднее в день',
+  rvVsPrev: 'к прошлому периоду',
+  rvHint: 'Ведите пальцем по графику или коснитесь дня',
 } as const;
 
 export type Dict = { [K in keyof typeof ru]: string };
