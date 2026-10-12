@@ -3,7 +3,7 @@
     "name": "METALL ASIA",
     "slug": "metall-asia",
     "scheme": "metallasia",
-    "version": "0.9.5",
+    "version": "0.9.6",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -23,7 +23,7 @@
       "permissions": [
         "android.permission.REQUEST_INSTALL_PACKAGES"
       ],
-      "versionCode": 905
+      "versionCode": 906
     },
     "web": {
       "bundler": "metro",
