@@ -59,7 +59,8 @@ export function Intro() {
 
   useEffect(() => {
     // отладка в браузере: ?introAt=1200 — кадр замирает на 1200 мс
-    const at = Platform.OS === 'web' ? Number(new URLSearchParams(globalThis.location?.search ?? '').get('introAt')) : NaN;
+    const raw = Platform.OS === 'web' ? new URLSearchParams(globalThis.location?.search ?? '').get('introAt') : null;
+    const at = raw === null ? NaN : Number(raw);
     if (Number.isFinite(at) && at >= 0) {
       const o = (x: number) => 1 - Math.pow(1 - x, 3);
       const io = (x: number) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);

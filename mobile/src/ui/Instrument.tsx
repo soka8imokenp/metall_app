@@ -410,17 +410,15 @@ export function StatusTrack({ route, label, size = 'sm', align = 'left' }: { rou
     // текущее звено «дышит» несколько раз, если объект ждёт чьего-то действия
     g.value = route.wait ? withRepeat(withTiming(1, { duration: 900, easing: Easing.inOut(Easing.quad) }), 6, true) : 0;
   }, [route.wait, g]);
-  const pulse = useAnimatedStyle(() => ({ opacity: 1 - g.value * 0.55 }));
-  const groove = colors.isDark ? 'rgba(0,0,0,0.42)' : 'rgba(152,160,178,0.30)';
-
+  const pulse = useAnimatedStyle(() => ({ opacity: 1 - g.value * 0.35 }));
+  // звенья лежат в вдавленном желобке — как поля ввода и переключатели, без свечения
   const links = Array.from({ length: route.total }).map((_, i) => {
     const done = i < route.step;
     const cur = i === route.step;
     const after = i > route.step;
-    if (route.broken && after) return null;
-    const bg = route.broken ? (cur ? c : colors.dangerBg) : cur ? c : done ? (colors.isDark ? 'rgba(236,238,242,0.42)' : 'rgba(31,34,42,0.38)') : groove;
+    if (route.broken && after) return <View key={i} style={{ height: H, ...(lg ? { flex: 1 } : { width: W }) }} />;
+    const bg = route.broken ? (cur ? c : colors.dangerBg) : cur ? c : done ? (colors.isDark ? 'rgba(236,238,242,0.30)' : 'rgba(31,34,42,0.26)') : 'transparent';
     const st: ViewStyle = { height: H, borderRadius: H / 2, backgroundColor: bg, ...(lg ? { flex: 1 } : { width: W }) };
-    if (cur && !route.broken) Object.assign(st, { boxShadow: `0px 0px ${lg ? 8 : 5}px ${c}` });
     return cur ? <Animated.View key={i} style={[st, pulse]} /> : <View key={i} style={st} />;
   });
 
@@ -430,15 +428,8 @@ export function StatusTrack({ route, label, size = 'sm', align = 'left' }: { rou
     </Text>
   );
   const track = (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: lg ? 4 : 3, ...(lg ? { flex: 1 } : null) }}>
+    <View style={[{ flexDirection: 'row', alignItems: 'center', gap: lg ? 4 : 2.5, padding: lg ? 4 : 3, borderRadius: (H + (lg ? 8 : 6)) / 2, backgroundColor: colors.card, ...(lg ? { flex: 1 } : null) }, neu(colors, 'insetSm')]}>
       {links}
-      {route.broken && (
-        // обрыв: две косые риски на месте разрыва
-        <View style={{ flexDirection: 'row', gap: 2, marginLeft: 2 }}>
-          <View style={{ width: 2, height: H + 5, borderRadius: 1, backgroundColor: c, transform: [{ rotate: '20deg' }] }} />
-          <View style={{ width: 2, height: H + 5, borderRadius: 1, backgroundColor: c, transform: [{ rotate: '20deg' }] }} />
-        </View>
-      )}
     </View>
   );
 
