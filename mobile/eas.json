@@ -1,12 +1,30 @@
 {
-  "cli": { "version": ">= 16.0.0" },
+  "cli": {
+    "version": ">= 16.0.0",
+    "appVersionSource": "local"
+  },
   "build": {
-    "preview": {
-      "distribution": "internal",
-      "android": { "buildType": "apk" },
-      "ios": { "simulator": true },
-      "env": { "EXPO_PUBLIC_API_URL": "https://metall-asia.cloudplus.uz/api/v1" }
+    "simulator": {
+      "ios": {
+        "simulator": true
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://metall-asia.cloudplus.uz/api/v1"
+      }
     },
-    "production": { "autoIncrement": true }
+    "production": {
+      "distribution": "store",
+      "ios": {
+        "resourceClass": "default"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://metall-asia.cloudplus.uz/api/v1"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {}
+    }
   }
 }

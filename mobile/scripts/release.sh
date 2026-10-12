@@ -35,6 +35,7 @@ node -e '
   const [a, b, c] = v.split(".").map(Number);
   j.expo.version = v;
   j.expo.android = { ...j.expo.android, versionCode: a * 10000 + b * 100 + c };
+  j.expo.ios = { ...j.expo.ios, buildNumber: String(a * 10000 + b * 100 + c) };
   fs.writeFileSync("app.json", JSON.stringify(j, null, 2) + "\n");
 ' "$VERSION"
 

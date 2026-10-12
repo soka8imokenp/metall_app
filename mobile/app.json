@@ -9,7 +9,14 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "uz.metallasia.app"
+      "bundleIdentifier": "uz.metallasia.app",
+      "buildNumber": "906",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        }
+      }
     },
     "android": {
       "package": "uz.metallasia.app",
@@ -82,6 +89,13 @@
             "image": "./assets/splash-icon.png",
             "backgroundColor": "#1b1d22"
           }
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Камера нужна для фото чеков, сканов документов и продукции",
+          "photosPermission": "Доступ к фото — чтобы прикрепить снимок к документу или операции"
         }
       ]
     ],
