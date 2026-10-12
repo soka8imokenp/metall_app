@@ -56,7 +56,11 @@ api/                    client.ts (запросы, refresh-токен), query.ts
 auth/AuthProvider.tsx   вход/выход, права (can('perm')), компания
 components/             листы форм по модулям (warehouse, production, finance, sales, documents, admin), Photos
 lib/                    format, status, modules, network, storage, device, updates, push, files
-ui/                     дизайн-система: components, Band, TabBar, Sheet, Drawer, AppLock, UpdatePrompt, PushBridge…
+components/home/        RevenueChart — график выручки на главной (ведение пальцем)
+ui/                     дизайн-система: components, Band (красная шапка), TabBar, Sheet, Drawer (боковое меню),
+                        Instrument (статус-маршрут, показания, табличка, док действий, свайп-подтверждение),
+                        CompanySwitch (выбор компании в шапке), Intro (заставка), Success (анимация успеха),
+                        AppLock (PIN/отпечаток), UpdatePrompt (обновление APK), PushBridge (push), Steel (материал карточек)
 i18n/                   ru.ts, uz.ts — все тексты на двух языках
 ```
 
@@ -117,7 +121,16 @@ TestFlight.
 - **Администрирование:** пользователи (вкл/выкл доступ, снять блокировку), их сессии
   (завершить) и устройства (отозвать/восстановить), минимальная версия приложения.
 - **Push (код готов):** запрос разрешения, регистрация адреса, переключатель в настройках,
-  переход в нужный раздел по нажатию. Не работает до шага 7.3.
+  переход в нужный раздел по нажатию. Не работает до шага 7.3. Код: `src/lib/push.ts`,
+  `src/ui/PushBridge.tsx`, `app.config.js` (подключает `google-services.json`, если он лежит в `mobile/`).
+- **Выбор компании:** «Обе компании / Металл Азия / Трубный завод» — строкой под заголовком
+  каждого главного экрана (касание — лист выбора, свайп — переключение). Шлёт `X-Company-Id`;
+  «обе» — без заголовка.
+- **Главная:** показатели за 30 дней, задачи «требует решения», график выручки (сумма заказов
+  по дате оформления, 7/14/30 дней, ведение пальцем по графику).
+- **Дизайн:** soft-UI «стальные пластины», красная шапка с графитовой волной, статусы как
+  маршрут из звеньев во вдавленном желобке, необратимые действия — свайпом в нижнем доке,
+  анимированная заставка из геометрии знака (`src/ui/Intro.tsx`).
 
 ## 7. Осталось — на стороне сервера / инфраструктуры
 
@@ -180,17 +193,78 @@ TestFlight.
   паролей (`логин123`). На боевом сервере — свои пароли, стендовые учётки удалить.
 - `PUSH_SCHEDULER`, `GITHUB_*` — проверить в `.env` боевого сервера.
 
-## 8. Локальная разработка (для справки)
+## 8. Локальный стенд разработчика (как сейчас устроено)
+
+Всё крутится на ПК разработчика (Arch Linux, 8 ГБ ОЗУ, 8 ядер). После перезагрузки ПК
+сервер и мост **нужно запускать заново** (база в Docker поднимается сама):
 
 ```bash
-# сервер
-cd backend && docker compose up -d && npm run build && node dist/main.js   # 127.0.0.1:4000
-# мост для телефона в локальной сети (CORS, 0.0.0.0:4001)
-cd mobile && node scripts/dev-proxy.mjs
-# веб-просмотр приложения
-cd mobile && npx expo start --web --port 8081
-# проверка типов
-cd mobile && npx tsc --noEmit
-# выпуск APK (тяжело: не запускать параллельно с другими сборками)
-cd mobile && ./scripts/release.sh 0.9.3 "что нового"
+cd backend && docker compose up -d                      # postgres:18, контейнер metall-asia-postgres
+cd backend && npm run build && node dist/main.js        # API на 127.0.0.1:4000
+cd mobile && PROXY_LOG=off node scripts/dev-proxy.mjs   # мост 0.0.0.0:4001 → 4000 с CORS, для телефона в Wi-Fi
+cd mobile && npx expo start --web --port 8081           # веб-просмотр приложения (только для разработки)
+cd mobile && npx tsc --noEmit                           # проверка типов
 ```
+
+- Телефон ходит на `http://192.168.1.165:4001/api/v1` (адрес ПК в локальной сети вшит в сборку
+  через `EXPO_PUBLIC_API_URL`, в приложении его можно сменить на экране входа → «Сервер»).
+- Тестовые учётки стенда: пароль = `логин` + `123` (например `admin` / `admin123`,
+  `a.saidov` / `a.saidov123`). **На боевом сервере — сменить.** E2E-тесты сервера создают своих
+  пользователей; часть старых тестов ждёт сидовый пароль — см. `backend/prisma/seed.ts`.
+- Тесты мобильной части сервера: `cd backend && npx vitest run test/mobile-sessions.e2e.spec.ts test/mobile-updates.spec.ts`.
+- Веб-просмотр заставки по кадрам: `http://localhost:8081/?introAt=1200` (кадр замирает на 1200 мс).
+
+### Переменные `backend/.env` (значения — у владельца, в репозиторий не попадают)
+`DATABASE_URL`, `SHADOW_DATABASE_URL`, `APP_DATABASE_URL`, `JWT_SECRET_FILE`, `PORT`, `CORS_ORIGINS`,
+`BACKUP_SCHEDULER`, `RATES_SCHEDULER`, `EXCHANGE_SCHEDULER`, `RATES_AUTOLOAD`, `ATTACHMENTS_DIR`,
+`GITHUB_RELEASES_REPO` (+ необязательные `GITHUB_TOKEN_FILE`, `UPDATES_DIR`, `PUSH_SCHEDULER`).
+Пароли ролей БД — файлы в `~/.local/state/openclaw/secrets/` (см. `08-STAND-DEPLOY.md`).
+
+## 9. Сборка и выпуск APK
+
+```bash
+cd mobile && ./scripts/release.sh 0.9.11 "что нового"
+```
+
+Скрипт: ставит версию в `app.json` (`versionCode`/`buildNumber` = a·10000+b·100+c) →
+`expo prebuild` → сборка APK в Docker (образ `metall-apk-builder`, `scripts/android-build/Dockerfile`)
+→ копия в `../../builds/MetallAsia-<версия>-arm64.apk` → публикация `latest.json` + APK
+в ветку `releases` репозитория (git по SSH-ключу разработчика). Сервер видит выпуск за ~5 минут
+(или сразу после перезапуска API); телефоны предлагают «Скачать / Установить».
+
+**Ограничения сборки — не менять без причины** (ПК с 8 ГБ дважды зависал):
+- контейнер: `--cpus 3`, `--memory 2500m --memory-swap 4500m`, низкий вес CPU/диска;
+- C++ в один поток (`CMAKE_BUILD_PARALLEL_LEVEL=1`), Metro в 2 потока (`METRO_MAX_WORKERS`,
+  читает `metro.config.js`), Gradle `-Xmx1792m`, metaspace 640m, lint отключён;
+- NDK и CMake хранятся в томах Docker `metall-android-ndk` / `metall-android-cmake`,
+  Gradle — в `metall-gradle-cache`;
+- **папку `mobile/android` между сборками не удалять**: там собранный C++, без него сборка с нуля
+  ~35 мин вместо ~15–20. Удалять, только если после оборванной сборки остались файлы root
+  (через `docker run --rm -v "$PWD":/app alpine rm -rf /app/android`);
+- перед сборкой остановить веб-просмотр Expo; две сборки параллельно не запускать.
+
+APK подписан **отладочным ключом** — до раздачи сотрудникам нужен постоянный (пункт 7.4).
+
+Альтернатива без нагрузки на ПК — облачная сборка Expo (EAS): `eas.json` уже содержит профили
+`production` (магазин/TestFlight) и `simulator` (для Appetize); нужен вход `npx eas-cli login`.
+
+## 10. Состояние на 12.10.2026 (версия 0.9.10)
+
+| Что | Состояние |
+|---|---|
+| Android-приложение | Функционал готов, выпущено 0.9.10, обновляется из приложения |
+| Проверено на телефоне владельцем | вход, модули, обновления, отпечаток, заставка (до 0.9.10), выбор компании |
+| Проверено только в браузере/запросами | админ-экраны (отзыв устройства, отключение доступа), сторно, загрузка скана, резервы, отчёты |
+| Не проверено | работа под ролями кладовщик / мастер / бухгалтер / менеджер (только admin) |
+| iOS | Конфигурация готова (`app.json` → `ios`, `eas.json`), не собиралось: нужны Expo-вход, ключ App Store Connect, карточка приложения |
+| Push | Код готов, нужен Firebase (+ Expo) — пункт 7.3 |
+| Сервер стенда `metall-asia.cloudplus.uz` | Старая версия без мобильной части (`/mobile/config` → 404) — нужно развернуть текущий `main` |
+
+## 11. Что передать и что сделать новому исполнителю
+
+1. Репозиторий `github.com/soka8imokenp/metall_app`, ветка `main` (публичный — секретов в нём нет).
+2. От владельца, лично (не через чат с ИИ): `backend/.env` и файлы паролей БД; SSH-ключ для
+   публикации в ветку `releases`; позже — ключ подписи APK, доступы Apple / Expo / Firebase.
+3. Порядок работ: боевой сервер по HTTPS с текущим `main` (7.1–7.2) → постоянный ключ подписи
+   (7.4) → пересборка APK с боевым адресом (`RELEASE_API_URL=https://…/api/v1 ./scripts/release.sh …`)
+   → push (7.3) → iOS через EAS/TestFlight (7.5) → смена тестовых паролей (7.6).
