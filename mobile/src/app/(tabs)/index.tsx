@@ -54,32 +54,105 @@ function ActionTile({ icon, label, caption, onPress }: { icon: IconName; label: 
   );
 }
 
-/** Выручка по дням: вдавленные дорожки, заполненные тёмным столбиком; выбранный день — красный. */
-function WeekBars({ points }: { points: { label: string; value: number }[] }) {
+type Day = { date: string; label: string; value: number };
+const PERIODS = [7, 14, 30] as const;
+
+/**
+ * Выручка по дням — сумма заказов клиентов по дате оформления (как на
+ * главной веб-платформы). Дни идут подряд, включая пустые: пропуск дня
+ * без продаж — тоже информация. Пунктир — средняя за период; сверху —
+ * выбранный день полной датой, итог и среднее.
+ */
+function RevenueChart({ days }: { days: Day[] }) {
   const { colors } = useTheme();
-  const { t } = useI18n();
-  const [sel, setSel] = useState(points.length - 1);
-  const max = Math.max(1, ...points.map((p) => p.value));
-  const cur = points[sel];
+  const { t, locale } = useI18n();
+  const [period, setPeriod] = useState<(typeof PERIODS)[number]>(14);
+  const pts = days.slice(-period);
+  const lastWith = (() => { for (let i = pts.length - 1; i >= 0; i--) if (pts[i].value > 0) return i; return pts.length - 1; })();
+  const [sel, setSel] = useState<number | null>(null);
+  const idx = sel !== null && sel < pts.length ? sel : lastWith;
+  const cur = pts[idx];
+  const max = Math.max(1e-9, ...pts.map((p) => p.value));
+  const total = pts.reduce((a, p) => a + p.value, 0);
+  const avg = total / Math.max(1, pts.length);
+  const H = 132;
+  const gap = period === 30 ? 3 : period === 14 ? 5 : 8;
+  const fullDate = (iso: string) => new Date(iso + 'T00:00:00').toLocaleDateString(locale === 'uz' ? 'uz-UZ' : 'ru-RU', { day: 'numeric', month: 'long', weekday: 'short' });
+  const dayNum = (iso: string) => Number(iso.slice(8, 10));
+  const showLabel = (i: number) => period !== 30 || ((i === 0 || i === pts.length - 1 || dayNum(pts[i].date) % 5 === 0) && Math.abs(i - idx) > 1);
+
   return (
-    <Card style={{ padding: 18, gap: 16 }}>
-      <View style={{ alignItems: 'center', gap: 2 }}>
-        <Text variant="callout" tone="secondary">{t('kpiRevenue')} · <Text variant="callout" style={{ fontWeight: '700' }}>{cur?.label}</Text></Text>
-        <Text num style={{ fontSize: 26, lineHeight: 32, fontWeight: '700', letterSpacing: -0.8, color: colors.text }}>{num(cur?.value ?? 0, 2)} <Text variant="body" tone="secondary">{t('bln')}</Text></Text>
-      </View>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
-        {points.map((p, i) => {
-          const on = i === sel;
-          const h = Math.max(0.06, p.value / max);
-          return (
-            <Pressable key={p.label + i} onPress={() => setSel(i)} scaleTo={0.96} style={{ flex: 1, alignItems: 'center', gap: 8 }}>
-              <View style={[{ width: '100%', maxWidth: 34, height: 120, borderRadius: 12, backgroundColor: colors.card, justifyContent: 'flex-end', padding: 4 }, neu(colors, 'insetSm')]}>
-                <View style={[{ height: `${h * 100}%`, borderRadius: 9, backgroundColor: on ? colors.brand : colors.isDark ? '#3a3e48' : '#c9cdd6' }, on ? neu(colors, 'raisedSm') : null]} />
-              </View>
-              <Text variant="caption" style={{ fontSize: 11, fontWeight: on ? '700' : '500', color: on ? colors.text : colors.textMuted }}>{p.label}</Text>
+    <Card style={{ padding: 18, gap: 14 }}>
+      {/* период */}
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Text style={{ fontSize: 10.5, letterSpacing: 0.9, textTransform: 'uppercase', fontWeight: '700', color: colors.textMuted }}>{t('rvByOrders')}</Text>
+        <View style={[{ flexDirection: 'row', padding: 3, borderRadius: 12, backgroundColor: colors.card }, neu(colors, 'insetSm')]}>
+          {PERIODS.map((p) => (
+            <Pressable key={p} onPress={() => { setPeriod(p); setSel(null); }} scaleTo={0.95} haptic={p !== period} style={[{ paddingHorizontal: 10, height: 26, borderRadius: 9, justifyContent: 'center' }, p === period ? [{ backgroundColor: colors.card }, neu(colors, 'raisedSm')] : null]}>
+              <Text variant="caption" num style={{ fontWeight: p === period ? '700' : '500', color: p === period ? colors.text : colors.textMuted }}>{p} {t('rvDays')}</Text>
             </Pressable>
-          );
-        })}
+          ))}
+        </View>
+      </View>
+
+      {/* выбранный день */}
+      <View style={{ gap: 2 }}>
+        <Text variant="callout" tone="secondary">{cur ? fullDate(cur.date) : ''}</Text>
+        <Text num style={{ fontSize: 28, lineHeight: 34, fontWeight: '700', letterSpacing: -0.9, color: cur && cur.value > 0 ? colors.text : colors.textMuted }}>
+          {cur && cur.value > 0 ? money(cur.value * 1e9) : t('rvNoSales')}
+        </Text>
+      </View>
+
+      {/* столбики дней подряд; пунктир — среднее */}
+      <View style={{ height: H + 20 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'flex-end', height: H, gap }}>
+          {pts.map((p, i) => {
+            const on = i === idx;
+            const h = p.value > 0 ? Math.max(0.05, p.value / max) : 0;
+            const weekend = [0, 6].includes(new Date(p.date + 'T00:00:00').getDay());
+            return (
+              <Pressable key={p.date} onPress={() => setSel(i)} scaleTo={0.94} haptic={!on} style={{ flex: 1, height: H, justifyContent: 'flex-end' }}>
+                <View style={[{ height: H, borderRadius: period === 30 ? 4 : 9, backgroundColor: colors.card, justifyContent: 'flex-end', padding: period === 30 ? 1.5 : 3, opacity: weekend && !on ? 0.75 : 1 }, neu(colors, 'insetSm')]}>
+                  {h > 0 ? (
+                    <View style={{ height: `${h * 100}%`, borderRadius: period === 30 ? 3 : 7, backgroundColor: on ? colors.brand : colors.isDark ? '#4a4f5b' : '#b9bec9' }} />
+                  ) : (
+                    <View style={{ alignSelf: 'center', width: 3, height: 3, borderRadius: 2, backgroundColor: on ? colors.brand : colors.textMuted, marginBottom: 2, opacity: 0.6 }} />
+                  )}
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
+        {avg > 0 && (
+          <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, bottom: 20 + Math.min(1, avg / max) * (H - 6) + 3, borderTopWidth: 1, borderStyle: 'dashed', borderColor: colors.brand, opacity: 0.55 }} />
+        )}
+        <View style={{ flexDirection: 'row', gap, marginTop: 6 }}>
+          {pts.map((p, i) => (
+            // подпись шире узкой колонки (30 дней) — выходит за её края, а не обрезается
+            <View key={p.date} style={{ flex: 1, alignItems: 'center', height: 14 }}>
+              {(showLabel(i) || i === idx) && (
+                <Text variant="caption" num style={{ position: 'absolute', width: 28, textAlign: 'center', fontSize: 10.5, fontWeight: i === idx ? '700' : '500', color: i === idx ? colors.text : colors.textMuted }}>
+                  {dayNum(p.date)}
+                </Text>
+              )}
+            </View>
+          ))}
+        </View>
+      </View>
+
+      {/* итог периода */}
+      <View style={{ flexDirection: 'row', gap: 10 }}>
+        <View style={{ flex: 1, gap: 2 }}>
+          <Text style={{ fontSize: 10.5, letterSpacing: 0.9, textTransform: 'uppercase', fontWeight: '600', color: colors.textMuted }}>{t('rvTotal')} · {period} {t('rvDays')}</Text>
+          <Text variant="callout" num style={{ fontWeight: '700' }}>{money(total * 1e9)}</Text>
+        </View>
+        <View style={{ flex: 1, gap: 2 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <View style={{ width: 14, borderTopWidth: 1, borderStyle: 'dashed', borderColor: colors.brand }} />
+            <Text style={{ fontSize: 10.5, letterSpacing: 0.9, textTransform: 'uppercase', fontWeight: '600', color: colors.textMuted }}>{t('rvAvg')}</Text>
+          </View>
+          <Text variant="callout" num style={{ fontWeight: '700' }}>{money(avg * 1e9)}</Text>
+        </View>
       </View>
     </Card>
   );
@@ -139,10 +212,10 @@ export default function Home() {
   if (actions.length < 2 && can('documents.edit')) actions.push({ icon: 'file-text', label: t('dcNew'), caption: t('tabDocuments'), onPress: () => router.navigate('/(tabs)/documents?new=1' as any) });
 
   /* неделя */
-  const week = useMemo(() => {
-    const rows = (dash.data?.chart ?? []).filter((c: any) => Number(c.totalRevenue) > 0).slice(-6);
-    return rows.map((c: any) => ({ label: String(locale === 'uz' ? c.displayDateUz : c.displayDateRu).split(' ')[0], value: Number(c.totalRevenue) }));
-  }, [dash.data, locale]);
+  const days: Day[] = useMemo(
+    () => (dash.data?.chart ?? []).map((c: any) => ({ date: String(c.date).slice(0, 10), label: locale === 'uz' ? c.displayDateUz : c.displayDateRu, value: Number(c.totalRevenue) || 0 })),
+    [dash.data, locale],
+  );
 
   /* задачи */
   type Task = { id: string; icon: IconName; tag: string; title: string; right?: string; to: string; tone: 'danger' | 'neutral' };
@@ -185,9 +258,9 @@ export default function Home() {
         )}
       </View>
 
-      {week.length >= 3 && (
+      {days.length >= 7 && (
         <Section title={t('weekRevenue')}>
-          <Appear i={2}><WeekBars points={week} /></Appear>
+          <Appear i={2}><RevenueChart days={days} /></Appear>
         </Section>
       )}
 

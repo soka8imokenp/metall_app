@@ -492,4 +492,9 @@ export const uz: Dict = {
   slPayShort: 'To‘lov',
   slStatusShort: 'Holat',
   slLeft: 'Qoldi',
+  rvByOrders: 'Buyurtmalar summasi sana bo‘yicha',
+  rvDays: 'kun',
+  rvNoSales: 'Sotuv bo‘lmagan',
+  rvTotal: 'Jami',
+  rvAvg: 'Kunlik o‘rtacha',
 };

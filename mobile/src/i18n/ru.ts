@@ -495,6 +495,11 @@ export const ru = {
   slPayShort: 'Оплата',
   slStatusShort: 'Статус',
   slLeft: 'Осталось',
+  rvByOrders: 'Сумма заказов по дате',
+  rvDays: 'дн',
+  rvNoSales: 'Продаж не было',
+  rvTotal: 'Итого',
+  rvAvg: 'Среднее в день',
 } as const;
 
 export type Dict = { [K in keyof typeof ru]: string };
