@@ -18,7 +18,7 @@ import { UpdateProvider } from '@/ui/UpdatePrompt';
 import { AppLockProvider } from '@/ui/AppLock';
 import { PushBridge } from '@/ui/PushBridge';
 import { SuccessProvider } from '@/ui/Success';
-import { Intro, markAppReady } from '@/ui/Intro';
+import { Intro, markAppMounted, markAppReady, useIntroPhase } from '@/ui/Intro';
 import * as SplashScreen from 'expo-splash-screen';
 
 // нативная заставка держится, пока не начнёт играть анимированная (Intro)
@@ -53,9 +53,18 @@ function Gate() {
   const router = useRouter();
 
   useEffect(() => { if (ready) markAppReady(); }, [ready]);
+  // пока играет заставка, экраны не строим: иначе стройка всех вкладок
+  // забирает кадры у анимации (было: «первые 2 с плавно, потом рывок»)
+  const intro = useIntroPhase();
+  const build = ready && intro !== 'playing';
+  useEffect(() => {
+    if (!build) return;
+    // два кадра после построения — экран уже нарисован под заставкой
+    requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(markAppMounted, 150)));
+  }, [build]);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!build) return;
     const first = segments[0] as string | undefined;
     if (!user) {
       queryClient.clear();
@@ -65,11 +74,11 @@ function Gate() {
     } else if (first === 'login' || first === 'change-password' || first === undefined) {
       router.replace('/(tabs)');
     }
-  }, [ready, user, mustChangePassword, segments, router]);
+  }, [build, user, mustChangePassword, segments, router]);
 
   // пока не прочитали сохранённый вход, экраны не рисуем: иначе они на миг
   // увидят пустые права и выберут не тот фильтр по умолчанию
-  if (!ready) return <View style={{ flex: 1, backgroundColor: colors.canvas }} />;
+  if (!build) return <View style={{ flex: 1, backgroundColor: colors.canvas }} />;
 
   return (
     <>

@@ -1,3 +1,4 @@
+import { useIntroPhase } from './Intro';
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { AppState, Platform, StyleSheet, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSequence, withTiming } from 'react-native-reanimated';
@@ -172,11 +173,14 @@ function LockScreen({ onUnlock, onGiveUp }: { onUnlock: () => void; onGiveUp: ()
     if (r.success) onUnlock();
   }, [bioEnabled, bioAvailable, onUnlock, t]);
 
-  // Отпечаток предлагаем сразу — код только запасной путь.
+  // Отпечаток предлагаем сразу — код только запасной путь. Но не поверх
+  // заставки: системное окно отпечатка перекрывало её на запуске.
+  const intro = useIntroPhase();
   useEffect(() => {
-    const id = setTimeout(() => void bio(), 350);
+    if (intro !== 'done') return;
+    const id = setTimeout(() => void bio(), 450);
     return () => clearTimeout(id);
-  }, [bio]);
+  }, [bio, intro]);
 
   const check = async (full: string) => {
     const saved = await storage.get(K_PIN);

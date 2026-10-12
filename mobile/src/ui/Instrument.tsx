@@ -59,11 +59,8 @@ export function StatusLamp({ tone, label, pulse }: { tone: Tone; label: string; 
  * так глаз сразу ловит главное число экрана. Формат («292,1», «1 250»)
  * сохраняется — меняется только значение.
  */
-const ATextInput = Animated.createAnimatedComponent(TextInput);
-
-/** Формат числа внутри анимации (там нет Intl): «1 250,5» — пробелы разрядов и запятая. */
+/** Формат числа: «1 250,5» — пробелы разрядов и запятая, как у остальных сумм. */
 function fmt(v: number, frac: number, neg: boolean) {
-  'worklet';
   const f = Math.pow(10, frac);
   const r = Math.round(v * f) / f;
   const int = Math.floor(r);
@@ -73,39 +70,42 @@ function fmt(v: number, frac: number, neg: boolean) {
   out = s + out;
   if (frac > 0) {
     const dec = String(Math.round((r - int) * f));
-    out += ',' + '0'.repeat(frac - dec.length) + dec;
+    out += ',' + '0'.repeat(Math.max(0, frac - dec.length)) + dec;
   }
   return (neg ? '-' : '') + out;
 }
 
-export function CountText({ value, style, duration = 750 }: { value: string; style?: any; duration?: number }) {
+/**
+ * Крупная цифра «докручивается» от нуля один раз — при открытии экрана.
+ * Обычный текст: значение всегда в состоянии компонента, поэтому при
+ * перерисовке экрана (обновились данные) цифра не пропадает. Прошлый вариант
+ * через анимируемое поле ввода Android стирал при перерисовке.
+ */
+export function CountText({ value, style, duration = 700 }: { value: string; style?: any; duration?: number }) {
   const m = value.match(/^(-?)([\d\s\u00a0]+)(?:,(\d+))?$/);
   const target = m ? Number(m[2].replace(/[\s\u00a0]/g, '')) + (m[3] ? Number(`0.${m[3]}`) : 0) : NaN;
   const frac = m?.[3]?.length ?? 0;
   const neg = !!m?.[1];
-  const p = useSharedValue(0);
   const ran = useRef(false);
+  const [shown, setShown] = useState<number | null>(null);
   useEffect(() => {
-    if (!Number.isFinite(target)) return;
-    // докручиваем один раз — при открытии экрана; при обновлении данных цифра просто меняется
-    if (ran.current) { p.value = 1; return; }
+    if (!Number.isFinite(target) || ran.current || Platform.OS === 'web') return;
     ran.current = true;
-    p.value = withTiming(1, { duration, easing: Easing.out(Easing.quad) });
-  }, [target, duration, p]);
-  const props = useAnimatedProps(() => ({ text: fmt(target * p.value, frac, neg), defaultValue: '' }) as any);
-  // веб-сборка (только для просмотра) — без докрутки: там нет нативного обновления текста
-  if (!Number.isFinite(target) || Platform.OS === 'web') return <Text num style={style}>{value}</Text>;
-  const flat = StyleSheet.flatten(style) ?? {};
-  // анимация идёт на потоке интерфейса: текст меняется без перерисовки React
-  return (
-    <ATextInput
-      editable={false}
-      underlineColorAndroid="transparent"
-      animatedProps={props}
-      defaultValue={fmt(0, frac, neg)}
-      style={[{ padding: 0, margin: 0, fontFamily: 'Inter_700Bold', fontVariant: ['tabular-nums'] }, flat, { fontWeight: undefined }]}
-    />
-  );
+    let raf = 0;
+    let last = 0;
+    const t0 = Date.now();
+    const step = () => {
+      const p = Math.min(1, (Date.now() - t0) / duration);
+      // ~30 обновлений в секунду хватает глазу и не грузит поток
+      if (p >= 1 || Date.now() - last > 33) { last = Date.now(); setShown(p >= 1 ? null : target * (1 - Math.pow(1 - p, 4))); }
+      if (p < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    // прервали (пришли новые данные) — сразу точное значение, без застрявшей середины
+    return () => { cancelAnimationFrame(raf); setShown(null); };
+  }, [target, duration]);
+  // не докручиваем — показываем ровно то, что пришло с сервера
+  return <Text num style={style}>{shown === null ? value : fmt(shown, frac, neg)}</Text>;
 }
 
 /** Главное показание экрана: число крупно, разряд и единица — рядом мельче. */

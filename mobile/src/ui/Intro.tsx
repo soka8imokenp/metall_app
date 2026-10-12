@@ -1,166 +1,235 @@
 import React, { useEffect, useState, useSyncExternalStore } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, Text as RNText, View } from 'react-native';
 import Animated, {
   Easing, interpolate, runOnJS, useAnimatedProps, useAnimatedStyle, useSharedValue, withDelay, withTiming,
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Image } from 'expo-image';
-import Svg, { Circle, Defs, RadialGradient, Stop } from 'react-native-svg';
+import Svg, { Circle, Defs, Line, Path, RadialGradient, Stop } from 'react-native-svg';
 import * as Haptics from 'expo-haptics';
 import * as SplashScreen from 'expo-splash-screen';
 
-/* ---------- готовность приложения (вход прочитан, шрифты загружены) ---------- */
-let readyFlag = false;
+/*
+ * Порядок запуска, чтобы заставка шла без рывков:
+ *   playing — играет анимация; тяжёлое (экраны, вкладки) не строится;
+ *   holding — анимация доиграла и стоит на последнем кадре; под ним строится приложение;
+ *   done    — приложение построено, заставка растворилась; теперь можно звать отпечаток.
+ */
+type Phase = 'playing' | 'holding' | 'done';
+let phase: Phase = 'playing';
+let appReady = false;
+let appMounted = false;
 const subs = new Set<() => void>();
-export function markAppReady() {
-  if (readyFlag) return;
-  readyFlag = true;
-  subs.forEach((f) => f());
-}
-const useAppReady = () => useSyncExternalStore((f) => { subs.add(f); return () => subs.delete(f); }, () => readyFlag, () => readyFlag);
+const emit = () => subs.forEach((f) => f());
+const setPhase = (p: Phase) => { phase = p; emit(); };
+const subscribe = (f: () => void) => { subs.add(f); return () => { subs.delete(f); }; };
 
-const ACircle = Animated.createAnimatedComponent(Circle);
+/** Вход прочитан и шрифты загружены. */
+export function markAppReady() { if (!appReady) { appReady = true; emit(); } }
+/** Экраны приложения построены (первый кадр под заставкой). */
+export function markAppMounted() { if (!appMounted) { appMounted = true; emit(); } }
+export const useIntroPhase = () => useSyncExternalStore(subscribe, () => phase, () => phase);
+const useFlags = () => useSyncExternalStore(subscribe, () => (appReady ? 1 : 0) + (appMounted ? 2 : 0), () => 0);
+
+const AnimatedPath = Animated.createAnimatedComponent(Path);
+const ALine = Animated.createAnimatedComponent(Line);
 const EASE = Easing.bezier(0.22, 1, 0.36, 1);
-const S = 220; // поле сечения
+const IN_OUT = Easing.bezier(0.65, 0, 0.35, 1);
+
+const S = 300; // поле рисунка
 const C = S / 2;
-const R_SHELL = 96;
-const R_FOAM = 74;
-const R_STEEL = 48;
-const SHELL_LEN = 2 * Math.PI * R_SHELL;
-const PLATE_W = 168;
-const PLATE_H = 78;
-const MIN_SHOW = 2100;
+const R = 62; // стальная труба
+const L = 2 * Math.PI * R; // длина полосы = окружность трубы
+const N = 72; // точек на полосе
 
 /**
- * Заставка при запуске — то, что делает завод: сечение трубы в ППУ-изоляции
- * (оболочка, пенополиуретан, стальная труба) собирается по кругу, «камера»
- * проходит сквозь трубу, из глубины выходит красная плашка знака, внутри
- * снизу вверх вырастают горы, под ними — надпись и красная черта. Когда
- * приложение готово (вход прочитан, шрифты загружены), заставка растворяется.
- * Всё на нативных анимациях: ни видео, ни Lottie, на любом экране чётко.
+ * Заставка — как делают трубу: на чертеже проводятся осевые линии, стальная
+ * полоса выезжает и сворачивается в трубу (как на стане ТЭСА), шов
+ * сваривается — вспышка и искры, нарастает слой ППУ-изоляции и оболочка,
+ * рядом считается диаметр. Готовое сечение поднимается, под ним проявляется
+ * METALL ASIA. Всё на нативных анимациях.
  */
 export function Intro() {
-  const ready = useAppReady();
+  const p = useIntroPhase();
+  const flags = useFlags();
   const [gone, setGone] = useState(false);
-  const [minDone, setMinDone] = useState(false);
 
-  const shell = useSharedValue(0); // прорисовка оболочки
-  const foam = useSharedValue(0); // пенополиуретан
-  const steel = useSharedValue(0); // стальная труба
-  const through = useSharedValue(0); // пролёт сквозь трубу
-  const plate = useSharedValue(0); // плашка знака
-  const rise = useSharedValue(0); // горы
-  const word = useSharedValue(0); // надпись и черта
+  const axes = useSharedValue(0); // осевые линии чертежа
+  const strip = useSharedValue(0); // полоса выезжает
+  const bend = useSharedValue(0); // полоса сворачивается
+  const weld = useSharedValue(0); // сварка шва
+  const foam = useSharedValue(0); // ППУ и оболочка
+  const lift = useSharedValue(0); // сечение поднимается, надпись
   const out = useSharedValue(0); // уход
 
   useEffect(() => {
-    if (gone) return;
     // отладка в браузере: ?introAt=1200 — кадр замирает на 1200 мс
     const at = Platform.OS === 'web' ? Number(new URLSearchParams(globalThis.location?.search ?? '').get('introAt')) : NaN;
     if (Number.isFinite(at) && at >= 0) {
       const outE = (x: number) => 1 - Math.pow(1 - x, 3);
-      const p = (d: number, len: number, e: (x: number) => number = outE) => e(Math.max(0, Math.min(1, (at - d) / len)));
-      shell.value = p(0, 700); foam.value = p(120, 700); steel.value = p(260, 560);
-      through.value = p(780, 620, (x) => x * x); plate.value = p(900, 620);
-      rise.value = p(1180, 560); word.value = p(1420, 600);
+      const io = (x: number) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+      const q = (d: number, len: number, e: (x: number) => number = outE) => e(Math.max(0, Math.min(1, (at - d) / len)));
+      axes.value = q(0, 600); strip.value = q(150, 550); bend.value = q(650, 750, io);
+      weld.value = q(1380, 700, (x) => x); foam.value = q(1550, 700); lift.value = q(2150, 700);
       return;
     }
-    // нативная заставка — тот же графит без картинки: переход незаметен
     SplashScreen.hideAsync().catch(() => {});
-    shell.value = withTiming(1, { duration: 700, easing: EASE });
-    foam.value = withDelay(120, withTiming(1, { duration: 700, easing: EASE }));
-    steel.value = withDelay(260, withTiming(1, { duration: 560, easing: EASE }));
-    through.value = withDelay(780, withTiming(1, { duration: 620, easing: Easing.in(Easing.quad) }));
-    plate.value = withDelay(900, withTiming(1, { duration: 620, easing: EASE }, (f) => {
-      if (f && Platform.OS !== 'web') runOnJS(softTap)();
-    }));
-    rise.value = withDelay(1180, withTiming(1, { duration: 560, easing: EASE }));
-    word.value = withDelay(1420, withTiming(1, { duration: 600, easing: EASE }));
-    const t = setTimeout(() => setMinDone(true), MIN_SHOW);
-    return () => clearTimeout(t);
+    axes.value = withTiming(1, { duration: 600, easing: EASE });
+    strip.value = withDelay(150, withTiming(1, { duration: 550, easing: EASE }));
+    bend.value = withDelay(650, withTiming(1, { duration: 750, easing: IN_OUT }, (f) => { if (f) runOnJS(tick)('weld'); }));
+    weld.value = withDelay(1380, withTiming(1, { duration: 700, easing: Easing.linear }));
+    foam.value = withDelay(1550, withTiming(1, { duration: 700, easing: EASE }));
+    lift.value = withDelay(2150, withTiming(1, { duration: 700, easing: EASE }, (f) => { if (f) runOnJS(setPhase)('holding'); }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // приложение построено под последним кадром — растворяемся
   useEffect(() => {
-    if (gone || !ready || !minDone) return;
-    out.value = withTiming(1, { duration: 420, easing: Easing.inOut(Easing.quad) }, (f) => { if (f) runOnJS(setGone)(true); });
-  }, [ready, minDone, gone, out]);
+    if (p !== 'holding' || (flags & 3) !== 3 || gone) return;
+    out.value = withDelay(120, withTiming(1, { duration: 480, easing: Easing.inOut(Easing.quad) }, (f) => {
+      if (f) { runOnJS(setGone)(true); runOnJS(setPhase)('done'); }
+    }));
+  }, [p, flags, gone, out]);
 
-  const shellProps = useAnimatedProps(() => ({ strokeDashoffset: SHELL_LEN * (1 - shell.value) }));
-  const rings = useAnimatedStyle(() => ({
-    opacity: interpolate(through.value, [0, 0.7, 1], [1, 0.25, 0]),
-    transform: [{ scale: 0.9 + steel.value * 0.1 + through.value * 1.6 }],
+  /* полоса → труба: дуга постоянной длины с растущей кривизной */
+  const stripProps = useAnimatedProps(() => {
+    const th = Math.max(0.0001, bend.value * 2 * Math.PI * 0.997);
+    const k = th / L;
+    const len = L * strip.value;
+    const y0 = C - R * bend.value; // готовая труба встаёт в центр
+    let d = '';
+    for (let i = 0; i <= N; i++) {
+      const s = (i / N - 0.5) * len;
+      const x = C + Math.sin(k * s) / k;
+      const y = y0 + (1 - Math.cos(k * s)) / k;
+      d += (i ? 'L' : 'M') + x.toFixed(2) + ',' + y.toFixed(2);
+    }
+    return { d };
+  });
+  // при сварке шов раскаляется: поверх полосы — её оранжевая копия, вспыхивает и гаснет
+  const hot = useAnimatedStyle(() => ({ opacity: interpolate(weld.value, [0, 0.1, 0.5, 1], [0, 1, 0.15, 0], 'clamp') }));
+
+  const axisH = useAnimatedProps(() => ({ x1: C - axes.value * C, x2: C + axes.value * C }));
+  const axisV = useAnimatedProps(() => ({ y1: C - axes.value * C, y2: C + axes.value * C }));
+  const axesStyle = useAnimatedStyle(() => ({ opacity: interpolate(lift.value, [0, 1], [1, 0.35]) }));
+
+  // вспышка в точке шва (низ трубы)
+  const flash = useAnimatedStyle(() => ({
+    opacity: interpolate(weld.value, [0, 0.06, 0.4], [0, 1, 0], 'clamp'),
+    transform: [{ scale: interpolate(weld.value, [0, 0.1, 0.4], [0.2, 1, 1.8], 'clamp') }],
   }));
-  const foamStyle = useAnimatedStyle(() => ({ opacity: foam.value * 0.55, transform: [{ rotate: `${(1 - foam.value) * -70}deg` }] }));
-  const steelStyle = useAnimatedStyle(() => ({ opacity: steel.value, transform: [{ scale: 0.55 + steel.value * 0.45 }] }));
-  const plateStyle = useAnimatedStyle(() => ({
-    opacity: plate.value,
-    transform: [{ translateY: (1 - plate.value) * 14 }, { scale: 0.62 + plate.value * 0.38 }],
-  }));
-  const glow = useAnimatedStyle(() => ({ opacity: plate.value * 0.9, transform: [{ scale: 0.6 + plate.value * 0.4 }] }));
-  const mountains = useAnimatedStyle(() => ({ height: rise.value * PLATE_H }));
-  const wordStyle = useAnimatedStyle(() => ({ opacity: word.value, transform: [{ translateY: (1 - word.value) * 10 }] }));
-  const line = useAnimatedStyle(() => ({ width: word.value * 132 }));
+
+  const foamStyle = useAnimatedStyle(() => ({ opacity: foam.value, transform: [{ scale: 0.86 + foam.value * 0.14 }, { rotate: `${(1 - foam.value) * -40}deg` }] }));
+  const jacketStyle = useAnimatedStyle(() => ({ opacity: interpolate(foam.value, [0.3, 1], [0, 1], 'clamp'), transform: [{ scale: 0.92 + foam.value * 0.08 }] }));
+
+  // диаметр готовой трубы — подпись чертежа
+  const diaStyle = useAnimatedStyle(() => ({ opacity: interpolate(foam.value, [0, 0.3, 1], [0, 1, 1]) * interpolate(lift.value, [0, 0.6], [1, 0], 'clamp') }));
+
+  const emblem = useAnimatedStyle(() => ({ transform: [{ translateY: -lift.value * 58 }, { scale: 1 - lift.value * 0.18 }] }));
+  const word = useAnimatedStyle(() => ({ opacity: lift.value, transform: [{ translateY: (1 - lift.value) * 14 }] }));
+  const wordMask = useAnimatedStyle(() => ({ width: interpolate(lift.value, [0.1, 0.85], [0, 216], 'clamp') }));
+  const sheen = useAnimatedStyle(() => ({ transform: [{ translateX: interpolate(lift.value, [0.35, 1], [-60, 260], 'clamp') }], opacity: interpolate(lift.value, [0.35, 0.6, 1], [0, 1, 0], 'clamp') }));
+  const underline = useAnimatedStyle(() => ({ width: interpolate(lift.value, [0.3, 1], [0, 150], 'clamp') }));
+  const caption = useAnimatedStyle(() => ({ opacity: interpolate(lift.value, [0.55, 1], [0, 1], 'clamp') }));
   const root = useAnimatedStyle(() => ({ opacity: 1 - out.value }));
-  const content = useAnimatedStyle(() => ({ transform: [{ scale: 1 + out.value * 0.06 }] }));
+  const content = useAnimatedStyle(() => ({ transform: [{ scale: 1 + out.value * 0.05 }] }));
 
   if (gone) return null;
   return (
-    <Animated.View pointerEvents={ready && minDone ? 'none' : 'auto'} style={[StyleSheet.absoluteFill, { zIndex: 1000 }, root]}>
-      <LinearGradient colors={['#1d2028', '#121419', '#0b0c0f']} start={{ x: 0.2, y: 0 }} end={{ x: 0.8, y: 1 }} style={StyleSheet.absoluteFill} />
+    <Animated.View pointerEvents={p === 'playing' ? 'auto' : 'none'} style={[StyleSheet.absoluteFill, { zIndex: 1000 }, root]}>
+      <LinearGradient colors={['#1d2028', '#121419', '#0a0b0e']} start={{ x: 0.2, y: 0 }} end={{ x: 0.8, y: 1 }} style={StyleSheet.absoluteFill} />
       <Animated.View style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center' }, content]}>
-        {/* красное свечение за знаком */}
-        <Animated.View style={[{ position: 'absolute', width: 420, height: 420 }, glow]}>
-          <Svg width={420} height={420}>
+        <Animated.View style={[{ width: S, height: S }, emblem]}>
+          {/* мягкое красное свечение под трубой */}
+          <Svg width={S} height={S} style={StyleSheet.absoluteFill}>
             <Defs>
-              <RadialGradient id="g" cx="50%" cy="50%" r="50%">
-                <Stop offset="0" stopColor="#ce1f3c" stopOpacity={0.6} />
-                <Stop offset="0.45" stopColor="#ce1f3c" stopOpacity={0.2} />
+              <RadialGradient id="glow" cx="50%" cy="50%" r="50%">
+                <Stop offset="0" stopColor="#ce1f3c" stopOpacity={0.32} />
+                <Stop offset="0.55" stopColor="#ce1f3c" stopOpacity={0.08} />
                 <Stop offset="1" stopColor="#ce1f3c" stopOpacity={0} />
               </RadialGradient>
             </Defs>
-            <Circle cx={210} cy={210} r={210} fill="url(#g)" />
+            <Circle cx={C} cy={C} r={C} fill="url(#glow)" />
           </Svg>
-        </Animated.View>
 
-        {/* сечение трубы */}
-        <Animated.View style={[{ position: 'absolute', width: S, height: S }, rings]}>
-          <Svg width={S} height={S} style={{ transform: [{ rotate: '-90deg' }] }}>
-            <ACircle cx={C} cy={C} r={R_SHELL} stroke="rgba(255,255,255,0.85)" strokeWidth={3} fill="none" strokeLinecap="round" strokeDasharray={`${SHELL_LEN} ${SHELL_LEN}`} animatedProps={shellProps} />
-          </Svg>
+          {/* осевые линии чертежа — штрихпунктир */}
+          <Animated.View style={[StyleSheet.absoluteFill, axesStyle]}>
+            <Svg width={S} height={S}>
+              <ALine y1={C} y2={C} stroke="rgba(255,255,255,0.22)" strokeWidth={1} strokeDasharray="14 4 2 4" animatedProps={axisH} />
+              <ALine x1={C} x2={C} stroke="rgba(255,255,255,0.22)" strokeWidth={1} strokeDasharray="14 4 2 4" animatedProps={axisV} />
+            </Svg>
+          </Animated.View>
+
+          {/* слой ППУ: пористое кольцо янтарного цвета пены */}
           <Animated.View style={[StyleSheet.absoluteFill, foamStyle]}>
             <Svg width={S} height={S}>
-              <Circle cx={C} cy={C} r={R_FOAM} stroke="#ffffff" strokeWidth={30} strokeDasharray="3 5" fill="none" opacity={0.5} />
+              <Circle cx={C} cy={C} r={R + 21} stroke="#e0a63a" strokeOpacity={0.55} strokeWidth={30} strokeDasharray="2.5 3.5" fill="none" />
             </Svg>
           </Animated.View>
-          <Animated.View style={[StyleSheet.absoluteFill, steelStyle]}>
+          {/* оболочка */}
+          <Animated.View style={[StyleSheet.absoluteFill, jacketStyle]}>
             <Svg width={S} height={S}>
-              <Circle cx={C} cy={C} r={R_STEEL} stroke="#ce1f3c" strokeWidth={10} fill="none" />
+              <Circle cx={C} cy={C} r={R + 39} stroke="#3c414c" strokeWidth={7} fill="none" />
+              <Circle cx={C} cy={C} r={R + 42} stroke="rgba(255,255,255,0.35)" strokeWidth={1} fill="none" />
             </Svg>
           </Animated.View>
-        </Animated.View>
 
-        {/* знак: красная плашка, горы вырастают снизу */}
-        <Animated.View style={[{ width: PLATE_W, height: PLATE_H, borderRadius: 16, overflow: 'hidden', boxShadow: '0px 14px 40px rgba(206,31,60,0.45)' } as any, plateStyle]}>
-          <LinearGradient colors={['#de2a47', '#c41a35']} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={StyleSheet.absoluteFill} />
-          <LinearGradient colors={['rgba(255,255,255,0.22)', 'rgba(255,255,255,0)']} style={[StyleSheet.absoluteFill, { height: PLATE_H / 2 }]} />
-          <Animated.View style={[{ position: 'absolute', left: 0, right: 0, bottom: 0, overflow: 'hidden' }, mountains]}>
-            <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: PLATE_H, alignItems: 'center', justifyContent: 'center' }}>
-              <Image source={require('../../assets/brand/metall-asia-glyph.png')} style={{ width: PLATE_W * 0.78, height: PLATE_W * 0.78 * (142 / 406) }} contentFit="contain" />
-            </View>
+          {/* стальная полоса → труба */}
+          <Svg width={S} height={S} style={StyleSheet.absoluteFill}>
+            <AnimatedPath animatedProps={stripProps} stroke="#c9ced8" strokeWidth={8} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+          </Svg>
+          <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, hot]}>
+            <Svg width={S} height={S}>
+              <Circle cx={C} cy={C} r={R} stroke="#ffb35c" strokeWidth={8} fill="none" />
+            </Svg>
+          </Animated.View>
+
+          {/* сварка: вспышка и искры у шва */}
+          <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: C - 13, top: C + R - 13, width: 26, height: 26, borderRadius: 13, backgroundColor: '#fff3d6', boxShadow: '0px 0px 18px #ff9a3c, 0px 0px 40px #ff6a1a' } as any, flash]} />
+          {SPARKS.map((sp, i) => <Spark key={i} sp={sp} t={weld} />)}
+
+          {/* диаметр */}
+          <Animated.View style={[{ position: 'absolute', left: C + R + 50, top: C - 24, width: 80 }, diaStyle]}>
+            <RNText numberOfLines={1} style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: '700', letterSpacing: 1, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>{'Ø\u00a01020'}</RNText>
           </Animated.View>
         </Animated.View>
 
-        {/* надпись и красная черта */}
-        <Animated.View style={[{ alignItems: 'center', marginTop: 26, gap: 12 }, wordStyle]}>
-          <Image source={require('../../assets/brand/metall-asia-wordmark-white.png')} style={{ width: 196, height: 196 * (29 / 343) }} contentFit="contain" />
-          <Animated.View style={[{ height: 2, borderRadius: 1, backgroundColor: '#ce1f3c' }, line]} />
+        {/* надпись проявляется слева направо, по ней пробегает блик */}
+        <Animated.View style={[{ position: 'absolute', top: '50%', marginTop: 70, alignItems: 'center', gap: 12 }, word]}>
+          <Animated.View style={[{ height: 216 * (29 / 343), overflow: 'hidden' }, wordMask]}>
+            <Image source={require('../../assets/brand/metall-asia-wordmark-white.png')} style={{ width: 216, height: 216 * (29 / 343) }} contentFit="contain" />
+            <Animated.View pointerEvents="none" style={[{ position: 'absolute', top: -6, bottom: -6, width: 46 }, sheen]}>
+              <LinearGradient colors={['rgba(255,255,255,0)', 'rgba(255,255,255,0.75)', 'rgba(255,255,255,0)']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
+            </Animated.View>
+          </Animated.View>
+          <Animated.View style={[{ height: 2, borderRadius: 1, backgroundColor: '#ce1f3c' }, underline]} />
+          <Animated.View style={caption}>
+            <RNText style={{ color: 'rgba(255,255,255,0.5)', fontSize: 10.5, letterSpacing: 3, fontWeight: '600' }}>ТРУБЫ · ППУ-ИЗОЛЯЦИЯ · МЕТАЛЛ</RNText>
+          </Animated.View>
         </Animated.View>
       </Animated.View>
     </Animated.View>
   );
 }
 
-function softTap() {
-  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Soft).catch(() => {});
+/* искры сварки: разлёт с «гравитацией» и угасанием */
+const SPARKS = Array.from({ length: 12 }).map((_, i) => {
+  const a = Math.PI * (0.12 + (0.76 * i) / 11); // веером вниз-в стороны
+  const v = 70 + ((i * 37) % 50);
+  return { dx: Math.cos(a) * v, dy: Math.sin(a) * v * 0.8, len: 6 + (i % 3) * 3, rot: (a * 180) / Math.PI };
+});
+
+function Spark({ sp, t }: { sp: (typeof SPARKS)[number]; t: { value: number } }) {
+  const st = useAnimatedStyle(() => {
+    const q = Math.min(1, t.value / 0.75);
+    return {
+      opacity: t.value <= 0.02 || q >= 1 ? 0 : 1 - q,
+      transform: [{ translateX: sp.dx * q }, { translateY: sp.dy * q + 90 * q * q }, { rotate: `${sp.rot}deg` }],
+    };
+  });
+  return <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: C - sp.len / 2, top: C + R, width: sp.len, height: 2, borderRadius: 1, backgroundColor: '#ffcf7a' }, st]} />;
+}
+
+function tick(_k: string) {
+  if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Rigid).catch(() => {});
 }
