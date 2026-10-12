@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { StatusTrack } from '@/ui/Instrument';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import { View } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -12,7 +13,7 @@ import { useAction } from '@/api/action';
 import { useApi } from '@/api/query';
 import { useAuth } from '@/auth/AuthProvider';
 import { useI18n } from '@/i18n';
-import { MARK_LABEL, STAGE_STATUS } from '@/lib/status';
+import { MARK_LABEL, routeOf, STAGE_STATUS } from '@/lib/status';
 
 /** Этап заказа и отметки по нему: начать, пауза (с причиной), продолжить, завершить. */
 export function StageCard({ s, orderUid, orderNumber, itemName, orderStatus, onOpenOrder, rail }: { s: any; orderUid: string; orderNumber?: string; itemName?: string; orderStatus?: string; onOpenOrder?: () => void; /** этап на линии маршрута (в карточке заказа), а не отдельной плиткой */ rail?: { first: boolean; last: boolean } }) {
@@ -47,7 +48,7 @@ export function StageCard({ s, orderUid, orderNumber, itemName, orderStatus, onO
           <Text variant="headline" numberOfLines={2}>{rail ? '' : `${s.seq}. `}{pick(s, 'name')}</Text>
           {!!s.workCenterCode && <Text variant="caption" tone="secondary">{pick(s, 'workCenterName')}</Text>}
         </View>
-        {!rail && <Badge label={t(k)} tone={tone} />}
+        {!rail && <StatusTrack route={routeOf('stage', s.status)} label={t(k)} align="right" />}
       </View>
       {orderStatus === 'planned' && (
         can('production.manage') ? (

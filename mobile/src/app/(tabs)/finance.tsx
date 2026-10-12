@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { StatusTrack } from '@/ui/Instrument';
 import { View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect } from 'react';
@@ -15,7 +16,7 @@ import { useI18n } from '@/i18n';
 import { useTheme } from '@/theme/ThemeProvider';
 import { useDebounced } from '@/lib/hooks';
 import { dateShort, money, moneyParts } from '@/lib/format';
-import { FIN_STATUS, FIN_TYPE } from '@/lib/status';
+import { FIN_STATUS, FIN_TYPE, routeOf } from '@/lib/status';
 
 type Tab = 'ops' | 'accounts' | 'debt';
 
@@ -119,7 +120,7 @@ function OpRow({ r, onPress }: { r: any; onPress: () => void }) {
           <Text variant="headline" num style={{ color: inc ? colors.success : colors.text }}>{inc ? '+' : r.type === 'expense' ? '−' : ''}{money(r.amount, r.currency)}</Text>
         </View>
       </View>
-      <Badge label={t(k)} tone={tone} />
+      <StatusTrack route={routeOf('finance', r.status)} label={t(k)} />
     </Card>
   );
 }

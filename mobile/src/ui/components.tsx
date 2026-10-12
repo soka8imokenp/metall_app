@@ -115,22 +115,20 @@ export function IconButton({ name, onPress, solid, size = 42 }: { name: IconName
   );
 }
 
-/* ---------- Бейдж ---------- */
+/* ---------- Метка ---------- */
 export type Tone = 'neutral' | 'success' | 'warning' | 'danger' | 'info';
+/**
+ * Метка без «таблетки»: короткая светящаяся риска цвета состояния и подпись
+ * капителью — как маркировка на щите, а не цветной ярлык веб-страницы.
+ * Статусы с маршрутом (заказы, документы, операции) рисует StatusTrack.
+ */
 export function Badge({ label, tone = 'neutral', dot = true }: { label: string; tone?: Tone; dot?: boolean }) {
   const { colors } = useTheme();
-  const map = {
-    neutral: [colors.infoBg, colors.textSecondary],
-    info: [colors.infoBg, colors.info],
-    success: [colors.successBg, colors.success],
-    warning: [colors.warningBg, colors.warning],
-    danger: [colors.dangerBg, colors.danger],
-  } as const;
-  const [bg, fg] = map[tone];
+  const fg = tone === 'success' ? colors.success : tone === 'warning' ? colors.warning : tone === 'danger' ? colors.danger : tone === 'info' ? colors.info : colors.textSecondary;
   return (
-    <View style={{ backgroundColor: bg, paddingHorizontal: 9, height: 24, borderRadius: 12, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-      {dot && <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: fg }} />}
-      <Text variant="caption" style={{ color: fg, fontWeight: '600', fontSize: 11.5 }} numberOfLines={1}>{label}</Text>
+    <View style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 7, height: 20 }}>
+      {dot && <View style={{ width: 3, height: 12, borderRadius: 1.5, backgroundColor: fg, boxShadow: tone === 'neutral' ? undefined : `0px 0px 5px ${fg}` } as any} />}
+      <Text style={{ color: fg, fontWeight: '700', fontSize: 10.5, lineHeight: 13, letterSpacing: 0.9, textTransform: 'uppercase' }} numberOfLines={1}>{label}</Text>
     </View>
   );
 }

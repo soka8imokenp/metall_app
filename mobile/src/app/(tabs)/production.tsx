@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { StatusTrack } from '@/ui/Instrument';
 import { View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect } from 'react';
@@ -12,7 +13,7 @@ import { useI18n } from '@/i18n';
 import { useTheme } from '@/theme/ThemeProvider';
 import { useDebounced } from '@/lib/hooks';
 import { dateShort, num, unit } from '@/lib/format';
-import { ORDER_STATUS } from '@/lib/status';
+import { ORDER_STATUS, routeOf } from '@/lib/status';
 import { useAuth } from '@/auth/AuthProvider';
 
 type Tab = 'mine' | 'orders';
@@ -97,9 +98,9 @@ function OrderRow({ r, onPress }: { r: any; onPress: () => void }) {
   const overdue = r.dueDate && new Date(r.dueDate) < new Date() && !['produced', 'closed', 'cancelled'].includes(r.status);
   return (
     <Card onPress={onPress} style={{ gap: 10 }}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <Text variant="headline">{r.number}</Text>
-        <Badge label={t(k)} tone={tone} />
+        <StatusTrack route={routeOf('order', r.status)} label={t(k)} align="right" />
       </View>
       <Text variant="callout" numberOfLines={2}>{pick(r, 'itemName')}</Text>
       <View style={{ height: 6, borderRadius: 3, backgroundColor: colors.muted, overflow: 'hidden' }}>

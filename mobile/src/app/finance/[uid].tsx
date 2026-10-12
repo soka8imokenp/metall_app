@@ -3,7 +3,7 @@ import { View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button, ErrorState, Field, Screen, Section, Skeleton } from '@/ui/components';
-import { ActionDock, DOCK_SPACE, DockKey, Readout, SlideConfirm, SpecPlate, StatusLamp, type Spec } from '@/ui/Instrument';
+import { ActionDock, DOCK_SPACE, DockKey, Readout, SlideConfirm, SpecPlate, StatusTrack, type Spec } from '@/ui/Instrument';
 import { Appear } from '@/ui/motion';
 import { Sheet } from '@/ui/Sheet';
 import { Text } from '@/ui/Text';
@@ -14,7 +14,7 @@ import { useAuth } from '@/auth/AuthProvider';
 import { useI18n } from '@/i18n';
 import { useTheme } from '@/theme/ThemeProvider';
 import { dateShort, moneyParts } from '@/lib/format';
-import { FIN_STATUS, FIN_TYPE } from '@/lib/status';
+import { FIN_STATUS, FIN_TYPE, routeOf } from '@/lib/status';
 
 export default function OperationDetail() {
   const { uid } = useLocalSearchParams<{ uid: string }>();
@@ -81,10 +81,8 @@ export default function OperationDetail() {
         <>
           {/* показание: статус-лампа и сумма */}
           <View style={{ paddingHorizontal: 22, marginBottom: 22, gap: 12 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <StatusLamp tone={stone as any} label={t(sk as any)} pulse={o.status === 'pending_approval'} />
-              <Text variant="caption" tone="muted" style={{ letterSpacing: 0.8, textTransform: 'uppercase', fontWeight: '600' }}>{t(FIN_TYPE[o.type] ?? 'fnExpense')}</Text>
-            </View>
+            <StatusTrack size="lg" route={routeOf('finance', o.status)} label={t(sk as any)} />
+            <Text variant="caption" tone="muted" style={{ letterSpacing: 0.8, textTransform: 'uppercase', fontWeight: '600', marginTop: 6 }}>{t(FIN_TYPE[o.type] ?? 'fnExpense')}</Text>
             <Readout value={value} unit={cur} color={o.type === 'income' ? colors.success : undefined} />
           </View>
 

@@ -16,6 +16,7 @@ import { EASE_OUT } from './motion';
 import { useTheme } from '@/theme/ThemeProvider';
 import { useOnline } from '@/lib/network';
 import type { Palette } from '@/theme/tokens';
+import type { Route } from '@/lib/status';
 
 /**
  * «Приборная» часть дизайна: экраны карточек читаются как панель прибора
@@ -386,6 +387,103 @@ export function SlideConfirm({ label, onConfirm, busy, tone = 'accent', icon = '
           {busy ? <ActivityIndicator color={fg} /> : <Feather name={icon} size={21} color={fg} strokeWidth={2.4} />}
         </Animated.View>
       </GestureDetector>
+    </View>
+  );
+}
+
+/* ---------- Статус как участок маршрута ---------- */
+/**
+ * Статус — не плашка, а положение на маршруте, собранном из звеньев трубы:
+ * пройденные звенья залиты приглушённо, текущее — цветом статуса со
+ * свечением, впереди — пустые желобки. Оборванный путь (отказ, отмена) —
+ * звенья красные, а за местом обрыва — разрыв. Подпись — капителью.
+ * `size="lg"` — для шапки карточки: звенья на всю ширину и «шаг N из M».
+ */
+export function StatusTrack({ route, label, size = 'sm', align = 'left' }: { route: Route; label: string; size?: 'sm' | 'lg'; align?: 'left' | 'right' }) {
+  const { colors } = useTheme();
+  const c = toneColor(colors, route.tone);
+  const lg = size === 'lg';
+  const W = lg ? 0 : 11;
+  const H = lg ? 8 : 5;
+  const g = useSharedValue(0);
+  useEffect(() => {
+    // текущее звено «дышит» несколько раз, если объект ждёт чьего-то действия
+    g.value = route.wait ? withRepeat(withTiming(1, { duration: 900, easing: Easing.inOut(Easing.quad) }), 6, true) : 0;
+  }, [route.wait, g]);
+  const pulse = useAnimatedStyle(() => ({ opacity: 1 - g.value * 0.55 }));
+  const groove = colors.isDark ? 'rgba(0,0,0,0.42)' : 'rgba(152,160,178,0.30)';
+
+  const links = Array.from({ length: route.total }).map((_, i) => {
+    const done = i < route.step;
+    const cur = i === route.step;
+    const after = i > route.step;
+    if (route.broken && after) return null;
+    const bg = route.broken ? (cur ? c : colors.dangerBg) : cur ? c : done ? (colors.isDark ? 'rgba(236,238,242,0.42)' : 'rgba(31,34,42,0.38)') : groove;
+    const st: ViewStyle = { height: H, borderRadius: H / 2, backgroundColor: bg, ...(lg ? { flex: 1 } : { width: W }) };
+    if (cur && !route.broken) Object.assign(st, { boxShadow: `0px 0px ${lg ? 8 : 5}px ${c}` });
+    return cur ? <Animated.View key={i} style={[st, pulse]} /> : <View key={i} style={st} />;
+  });
+
+  const text = (
+    <Text style={{ fontSize: lg ? 12 : 10.5, lineHeight: lg ? 15 : 13, letterSpacing: 0.9, textTransform: 'uppercase', fontWeight: '700', color: c }} numberOfLines={1}>
+      {label}
+    </Text>
+  );
+  const track = (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: lg ? 4 : 3, ...(lg ? { flex: 1 } : null) }}>
+      {links}
+      {route.broken && (
+        // обрыв: две косые риски на месте разрыва
+        <View style={{ flexDirection: 'row', gap: 2, marginLeft: 2 }}>
+          <View style={{ width: 2, height: H + 5, borderRadius: 1, backgroundColor: c, transform: [{ rotate: '20deg' }] }} />
+          <View style={{ width: 2, height: H + 5, borderRadius: 1, backgroundColor: c, transform: [{ rotate: '20deg' }] }} />
+        </View>
+      )}
+    </View>
+  );
+
+  if (lg) {
+    return (
+      <View style={{ gap: 8 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          {text}
+          {!route.broken && <Text variant="caption" tone="muted" num style={{ fontWeight: '600' }}>{route.step + 1} / {route.total}</Text>}
+        </View>
+        <View style={{ flexDirection: 'row' }}>{track}</View>
+      </View>
+    );
+  }
+  return (
+    <View style={{ alignItems: align === 'right' ? 'flex-end' : 'flex-start', gap: 5 }}>
+      {text}
+      {track}
+    </View>
+  );
+}
+
+/* ---------- Оплата: сечение, залитое на оплаченную долю ---------- */
+/**
+ * Маленькое кольцо-сечение трубы: залито на долю оплаты. Просрочка —
+ * красное кольцо с «!» внутри, полностью оплачено — зелёное с точкой.
+ */
+export function PayDial({ paid, total, status, label, size = 18 }: { paid: number; total: number; status: string; label: string; size?: number }) {
+  const { colors } = useTheme();
+  const f = total > 0 ? Math.max(0, Math.min(1, paid / total)) : 0;
+  const c = status === 'paid' ? colors.success : status === 'overdue' ? colors.danger : status === 'partial' ? colors.warning : colors.danger;
+  const sw = size * 0.2;
+  const r = (size - sw) / 2;
+  const len = 2 * Math.PI * r;
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+      <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+        <Svg width={size} height={size} style={{ transform: [{ rotate: '-90deg' }] }}>
+          <Circle cx={size / 2} cy={size / 2} r={r} stroke={colors.isDark ? 'rgba(255,255,255,0.10)' : 'rgba(152,160,178,0.35)'} strokeWidth={sw} fill="none" />
+          {f > 0 && <Circle cx={size / 2} cy={size / 2} r={r} stroke={c} strokeWidth={sw} fill="none" strokeDasharray={`${len * f} ${len}`} strokeLinecap="round" />}
+        </Svg>
+        {status === 'overdue' && <Text style={{ position: 'absolute', fontSize: size * 0.5, lineHeight: size * 0.6, fontWeight: '800', color: c }}>!</Text>}
+        {status === 'paid' && <View style={{ position: 'absolute', width: size * 0.22, height: size * 0.22, borderRadius: size, backgroundColor: c }} />}
+      </View>
+      <Text style={{ fontSize: 10.5, letterSpacing: 0.9, textTransform: 'uppercase', fontWeight: '700', color: c }} numberOfLines={1}>{label}</Text>
     </View>
   );
 }

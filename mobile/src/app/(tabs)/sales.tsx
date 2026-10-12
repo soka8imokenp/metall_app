@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { PayDial, StatusTrack } from '@/ui/Instrument';
 import { View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect } from 'react';
@@ -15,27 +16,23 @@ import { useI18n } from '@/i18n';
 import { useTheme } from '@/theme/ThemeProvider';
 import { useDebounced } from '@/lib/hooks';
 import { dateShort, dateTime, money, moneyParts, num } from '@/lib/format';
-import { PAY_TONE, SALES_STATUS_TONE } from '@/lib/status';
+import { routeOf } from '@/lib/status';
 
 type Stage = 'all' | 'unpaid' | 'paid' | 'production' | 'shipped';
 
 export function OrderRow({ r, onPress }: { r: any; onPress: () => void }) {
   const { t, pick } = useI18n();
   const { colors } = useTheme();
-  const paidPct = Number(r.amountTotal) > 0 ? Math.min(100, (Number(r.paidAmount) / Number(r.amountTotal)) * 100) : 0;
   return (
     <Card onPress={onPress} style={{ gap: 8 }}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <Text variant="headline">{r.number}</Text>
-        <Badge label={t(`slS${r.status}` as any)} tone={SALES_STATUS_TONE[r.status] ?? 'neutral'} />
+        <StatusTrack route={routeOf('sales', r.status)} label={t(`slS${r.status}` as any)} align="right" />
       </View>
       <Text variant="callout" numberOfLines={1}>{pick(r, 'partnerName')}</Text>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
         <Text variant="headline" num>{money(r.amountTotal)}</Text>
-        <Badge label={t(`slP${r.paymentStatus}` as any)} tone={PAY_TONE[r.paymentStatus] ?? 'neutral'} />
-      </View>
-      <View style={{ height: 4, borderRadius: 2, backgroundColor: colors.muted, overflow: 'hidden' }}>
-        <View style={{ width: `${paidPct}%`, height: 4, backgroundColor: colors.success }} />
+        <PayDial paid={Number(r.paidAmount)} total={Number(r.amountTotal)} status={r.paymentStatus} label={t(`slP${r.paymentStatus}` as any)} />
       </View>
       <Text variant="caption" tone="secondary">{r.managerName} · {t('slDelivery')} {dateShort(r.deliveryDate)}</Text>
     </Card>

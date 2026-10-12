@@ -6,7 +6,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { ListScreen } from '@/ui/ListScreen';
 import { Badge, Button, Card, KV, Divider, Field, IconButton, Tabs, SearchBar, Appear } from '@/ui/components';
 import { Sheet } from '@/ui/Sheet';
-import { PipeLevel } from '@/ui/Instrument';
+import { PipeLevel, StatusTrack } from '@/ui/Instrument';
+import { routeOf } from '@/lib/status';
 import { Text } from '@/ui/Text';
 import { Pressable } from '@/ui/Pressable';
 import { MoveSheet, MoveInit, MOVE_LABEL } from '@/components/warehouse/MoveSheet';
@@ -272,9 +273,9 @@ function SheetRow({ r, onPress }: { r: any; onPress: () => void }) {
   const [k, tone] = SHEET_STATUS[r.status] ?? ['whStatusDraft', 'neutral'];
   return (
     <Card onPress={onPress} style={{ gap: 8 }}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <Text variant="headline">{r.number}</Text>
-        <Badge label={t(k as any)} tone={tone} />
+        <StatusTrack route={routeOf('inventory', r.status)} label={t(k as any)} align="right" />
       </View>
       <Text variant="caption" tone="secondary">{pick(r.warehouse, 'name')}{r.zone ? ` · ${r.zone}` : ''}</Text>
       <View style={{ flexDirection: 'row', gap: 16 }}>

@@ -3,7 +3,7 @@ import { View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Badge, Button, Card, ErrorState, Field, IconButton, Screen, Section, Skeleton } from '@/ui/components';
-import { ActionDock, DOCK_SPACE, DockKey, Readout, SlideConfirm, SpecPlate, StatusLamp } from '@/ui/Instrument';
+import { ActionDock, DOCK_SPACE, DockKey, Readout, SlideConfirm, SpecPlate, StatusTrack } from '@/ui/Instrument';
 import { Appear } from '@/ui/motion';
 import { Sheet } from '@/ui/Sheet';
 import { Text } from '@/ui/Text';
@@ -15,7 +15,7 @@ import { useToast } from '@/ui/Toast';
 import { useI18n } from '@/i18n';
 import { useTheme } from '@/theme/ThemeProvider';
 import { dateShort, dateTime, itemTitle, money, moneyParts, num } from '@/lib/format';
-import { DOC_STATUS } from '@/lib/status';
+import { DOC_STATUS, routeOf } from '@/lib/status';
 import { openRemoteFile } from '@/lib/files';
 import { useOnline } from '@/lib/network';
 import type { Dict } from '@/i18n/ru';
@@ -102,10 +102,8 @@ export default function DocumentDetail() {
       ) : d ? (
         <>
           <View style={{ paddingHorizontal: 22, marginBottom: 22, gap: 12 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <StatusLamp tone={stone as any} label={t(sk as any)} pulse={d.status === 'pending_approval'} />
-              <Text variant="caption" tone="muted" num style={{ fontWeight: '600' }}>{dateShort(d.documentDate)}</Text>
-            </View>
+            <StatusTrack size="lg" route={routeOf('document', d.status)} label={t(sk as any)} />
+            <Text variant="caption" tone="muted" num style={{ fontWeight: '600', marginTop: 6 }}>{dateShort(d.documentDate)}</Text>
             <Readout value={moneyParts(d.amountTotal)[0]} unit={d.currency && d.currency !== 'UZS' ? moneyParts(d.amountTotal)[1].replace('сум', d.currency) : moneyParts(d.amountTotal)[1]} />
           </View>
 

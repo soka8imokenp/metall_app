@@ -3,7 +3,7 @@ import { View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Badge, Button, Card, Screen, Section, Skeleton, ErrorState, Field, Segmented } from '@/ui/components';
-import { ActionDock, DOCK_SPACE, DockKey, DockMain, GaugeBar, Readout, SpecPlate, StatusLamp } from '@/ui/Instrument';
+import { ActionDock, DOCK_SPACE, DockKey, DockMain, GaugeBar, Readout, SpecPlate, StatusTrack } from '@/ui/Instrument';
 import { Appear } from '@/ui/motion';
 import { Sheet } from '@/ui/Sheet';
 import { PickerField } from '@/ui/Picker';
@@ -16,7 +16,7 @@ import { useAuth } from '@/auth/AuthProvider';
 import { useI18n } from '@/i18n';
 import { useTheme } from '@/theme/ThemeProvider';
 import { dateShort, itemTitle, num, unit } from '@/lib/format';
-import { ORDER_STATUS } from '@/lib/status';
+import { ORDER_STATUS, routeOf } from '@/lib/status';
 
 export default function OrderDetail() {
   const { uid } = useLocalSearchParams<{ uid: string }>();
@@ -81,10 +81,8 @@ export default function OrderDetail() {
       ) : o ? (
         <>
           <View style={{ paddingHorizontal: 22, marginBottom: 24, gap: 12 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <StatusLamp tone={stone as any} label={t(sk as any)} pulse={o.status === 'paused' || o.status === 'in_progress'} />
-              <Text variant="caption" tone="muted" num style={{ fontWeight: '600' }}>{t('prDue')} {dateShort(o.dueDate)}</Text>
-            </View>
+            <StatusTrack size="lg" route={routeOf('order', o.status)} label={t(sk as any)} />
+            <Text variant="caption" tone="muted" num style={{ fontWeight: '600', marginTop: 6 }}>{t('prDue')} {dateShort(o.dueDate)}</Text>
             <Readout value={num(o.qtyProduced, 2)} unit={`/ ${num(o.qtyPlanned, 2)} ${unit(o.unit)}`} />
             <GaugeBar value={pct} left={`${Math.round(pct * 100)}%`} right={`${t('prPlan')} ${num(o.qtyPlanned, 2)} ${unit(o.unit)}`} />
           </View>

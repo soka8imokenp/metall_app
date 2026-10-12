@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { StatusTrack } from '@/ui/Instrument';
 import { View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect } from 'react';
@@ -15,7 +16,7 @@ import { useI18n } from '@/i18n';
 import { useTheme } from '@/theme/ThemeProvider';
 import { useDebounced } from '@/lib/hooks';
 import { dateShort, money } from '@/lib/format';
-import { DOC_STATUS } from '@/lib/status';
+import { DOC_STATUS, routeOf } from '@/lib/status';
 
 export default function Documents() {
   const { t, pick } = useI18n();
@@ -80,9 +81,9 @@ export default function Documents() {
           return (
             <>
               <Card onPress={() => router.push(`/documents/${r.uid}`)} style={{ gap: 8 }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <Text variant="headline">{r.number}</Text>
-                  <Badge label={t(k)} tone={tone} />
+                  <StatusTrack route={routeOf('document', r.status)} label={t(k)} align="right" />
                 </View>
                 <Text variant="callout" tone="secondary" numberOfLines={1}>{pick(r.type, 'name')}</Text>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>

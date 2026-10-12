@@ -3,7 +3,7 @@ import { View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Badge, Button, Card, ErrorState, Field, Screen, Section, Skeleton } from '@/ui/components';
-import { ActionDock, DOCK_SPACE, DockKey, DockMain, GaugeBar, Readout, SpecPlate, StatusLamp } from '@/ui/Instrument';
+import { ActionDock, DOCK_SPACE, DockKey, DockMain, GaugeBar, Readout, SpecPlate, StatusTrack, PayDial } from '@/ui/Instrument';
 import { Appear } from '@/ui/motion';
 import { Sheet } from '@/ui/Sheet';
 import { PickerField } from '@/ui/Picker';
@@ -15,7 +15,7 @@ import { useAuth } from '@/auth/AuthProvider';
 import { useI18n } from '@/i18n';
 import { useTheme } from '@/theme/ThemeProvider';
 import { dateShort, itemTitle, money, moneyParts, num, unit } from '@/lib/format';
-import { NEXT_SALES, PAY_TONE, SALES_STATUS_TONE } from '@/lib/status';
+import { NEXT_SALES, routeOf } from '@/lib/status';
 
 export default function OrderDetail() {
   const { uid } = useLocalSearchParams<{ uid: string }>();
@@ -101,9 +101,9 @@ export default function OrderDetail() {
       ) : o ? (
         <>
           <View style={{ paddingHorizontal: 22, marginBottom: 24, gap: 12 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
-              <StatusLamp tone={SALES_STATUS_TONE[o.status] ?? 'neutral'} label={t(`slS${o.status}` as any)} />
-              <StatusLamp tone={PAY_TONE[o.paymentStatus] ?? 'neutral'} label={t(`slP${o.paymentStatus}` as any)} pulse={o.paymentStatus === 'overdue'} />
+            <StatusTrack size="lg" route={routeOf('sales', o.status)} label={t(`slS${o.status}` as any)} />
+            <View style={{ marginTop: 6 }}>
+              <PayDial paid={Number(o.paidAmount)} total={Number(o.amountTotal)} status={o.paymentStatus} label={t(`slP${o.paymentStatus}` as any)} />
             </View>
             <Readout value={moneyParts(o.amountTotal)[0]} unit={moneyParts(o.amountTotal)[1]} />
             <GaugeBar value={paid} color={colors.success} left={`${t('slPaid')} ${money(o.paidAmount, o.currency)}`} right={rest > 0 ? `${t('slLeft')} ${money(rest, o.currency)}` : ''} />
