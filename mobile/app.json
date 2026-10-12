@@ -3,14 +3,14 @@
     "name": "METALL ASIA",
     "slug": "metall-asia",
     "scheme": "metallasia",
-    "version": "0.9.8",
+    "version": "0.9.9",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "uz.metallasia.app",
-      "buildNumber": "908",
+      "buildNumber": "909",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSAppTransportSecurity": {
@@ -30,7 +30,7 @@
       "permissions": [
         "android.permission.REQUEST_INSTALL_PACKAGES"
       ],
-      "versionCode": 908
+      "versionCode": 909
     },
     "web": {
       "bundler": "metro",
@@ -82,12 +82,12 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/splash-icon.png",
-          "imageWidth": 200,
-          "backgroundColor": "#e7e9ee",
+          "image": "./assets/splash-blank.png",
+          "imageWidth": 1,
+          "backgroundColor": "#121419",
           "dark": {
-            "image": "./assets/splash-icon.png",
-            "backgroundColor": "#1b1d22"
+            "image": "./assets/splash-blank.png",
+            "backgroundColor": "#121419"
           }
         }
       ],

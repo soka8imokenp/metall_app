@@ -18,6 +18,11 @@ import { UpdateProvider } from '@/ui/UpdatePrompt';
 import { AppLockProvider } from '@/ui/AppLock';
 import { PushBridge } from '@/ui/PushBridge';
 import { SuccessProvider } from '@/ui/Success';
+import { Intro, markAppReady } from '@/ui/Intro';
+import * as SplashScreen from 'expo-splash-screen';
+
+// нативная заставка держится, пока не начнёт играть анимированная (Intro)
+SplashScreen.preventAutoHideAsync().catch(() => {});
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
 
 const queryClient = new QueryClient({
@@ -46,6 +51,8 @@ function Gate() {
   const ready = authReady && fontsLoaded;
   const segments = useSegments();
   const router = useRouter();
+
+  useEffect(() => { if (ready) markAppReady(); }, [ready]);
 
   useEffect(() => {
     if (!ready) return;
@@ -105,6 +112,7 @@ export default function Root() {
           </I18nProvider>
         </ThemeProvider>
       </SafeAreaProvider>
+      <Intro />
     </GestureHandlerRootView>
   );
 }
