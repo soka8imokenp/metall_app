@@ -6,6 +6,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { ListScreen } from '@/ui/ListScreen';
 import { Badge, Button, Card, KV, Divider, Field, IconButton, Tabs, SearchBar, Appear } from '@/ui/components';
 import { Sheet } from '@/ui/Sheet';
+import { PipeLevel } from '@/ui/Instrument';
 import { Text } from '@/ui/Text';
 import { Pressable } from '@/ui/Pressable';
 import { MoveSheet, MoveInit, MOVE_LABEL } from '@/components/warehouse/MoveSheet';
@@ -15,7 +16,7 @@ import { useApi } from '@/api/query';
 import { useAuth } from '@/auth/AuthProvider';
 import { useI18n } from '@/i18n';
 import { useTheme } from '@/theme/ThemeProvider';
-import { dateTime, money, num, unit as u, moneyParts } from '@/lib/format';
+import { dateTime, itemTitle, money, num, unit as u, moneyParts } from '@/lib/format';
 import { useDebounced } from '@/lib/hooks';
 
 type Tab = 'stock' | 'moves' | 'inventory';
@@ -203,26 +204,34 @@ export default function Warehouse() {
   );
 }
 
+/**
+ * Строка остатка: сечение трубы, стенка которого заполнена по уровню запаса
+ * относительно минимума (красное и мигает — ниже критического), размер
+ * крупно, марка и место мелко, количество справа. Без плашек и длинных имён.
+ */
 function StockRow({ r, onPress }: { r: any; onPress: () => void }) {
-  const { pick, t } = useI18n();
-  const unit = u(r.item?.unit);
+  const { pick } = useI18n();
+  const it = itemTitle(pick(r.item, 'name'));
+  const d = Number(r.item?.diameterMm);
+  const head = d > 0 && r.item?.wallThicknessMm ? `Ø${d}×${num(r.item.wallThicknessMm, 1)}` : it.head;
+  const min = Number(r.minQty);
+  const level = min > 0 ? Number(r.levelAvailable) / (min * 2) : 1;
+  const tone = r.isBelowCritical ? 'critical' : r.isBelowMin ? 'low' : 'ok';
+  const wall = d > 0 ? 0.14 + Math.min(0.12, (Number(r.item.wallThicknessMm) / d) * 3) : 0.2;
+  const name = pick(r.item, 'name') ?? '';
+  const iso = name.match(/ППУ[-‑]?[А-ЯA-Z]+/)?.[0];
+  const sub = [iso, it.pipe || d > 0 ? r.item?.steelGrade : null, r.location, r.batch?.number].filter(Boolean).join(' · ');
   return (
-    <Card onPress={onPress} style={{ gap: 8 }}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}>
-        <View style={{ flex: 1, gap: 2 }}>
-          <Text variant="callout" style={{ fontWeight: '600' }} numberOfLines={2}>{pick(r.item, 'name')}</Text>
-          <Text variant="caption" tone="secondary" numberOfLines={1}>{pick(r.warehouse, 'name')} · {r.location ?? '—'}{r.batch?.number ? ` · ${r.batch.number}` : ''}</Text>
-        </View>
-        <View style={{ alignItems: 'flex-end' }}>
-          <Text variant="headline" num>{num(r.qtyAvailable, 2)}</Text>
-          <Text variant="caption" tone="secondary">{unit}</Text>
-        </View>
+    <Card onPress={onPress} style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 12 }}>
+      <PipeLevel level={level} tone={tone} size={40} wall={wall} />
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text variant="headline" num numberOfLines={1} style={{ fontSize: it.pipe || d > 0 ? 17 : 15 }}>{head}</Text>
+        <Text variant="caption" tone="muted" numberOfLines={1}>{sub}</Text>
       </View>
-      {(r.isBelowCritical || r.isBelowMin) && (
-        <View style={{ flexDirection: 'row', gap: 6 }}>
-          {r.isBelowCritical ? <Badge label={t('whBelowCritical')} tone="danger" /> : <Badge label={t('whBelowMin')} tone="warning" />}
-        </View>
-      )}
+      <View style={{ alignItems: 'flex-end' }}>
+        <Text num style={{ fontSize: 19, fontWeight: '700', letterSpacing: -0.5 }}>{num(r.qtyAvailable, 2)}</Text>
+        <Text variant="caption" tone="secondary">{u(r.item?.unit)}</Text>
+      </View>
     </Card>
   );
 }

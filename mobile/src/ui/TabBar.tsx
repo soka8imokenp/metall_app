@@ -1,4 +1,6 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
+import Animated, { useAnimatedStyle, useSharedValue, withSequence, withTiming } from 'react-native-reanimated';
+import { EASE_OUT } from './motion';
 import { Platform, StyleSheet, View } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -39,6 +41,14 @@ export function Glass({ target, style, children, strong }: { target?: React.RefO
 const Item = React.memo(function Item({ it, on, onPress }: { it: TabItem; on: boolean; onPress: (k: string) => void }) {
   const { colors } = useTheme();
   const color = on ? colors.brand : colors.text;
+  // выбранная иконка «подпрыгивает» и чуть поворачивается — отклик на выбор, как у клавиши
+  const k = useSharedValue(0);
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) { first.current = false; return; }
+    if (on) k.value = withSequence(withTiming(1, { duration: 160, easing: EASE_OUT }), withTiming(0, { duration: 340, easing: EASE_OUT }));
+  }, [on, k]);
+  const pop = useAnimatedStyle(() => ({ transform: [{ translateY: -4 * k.value }, { scale: 1 + 0.16 * k.value }, { rotate: `${-8 * k.value}deg` }] }));
   return (
     <Pressable
       onPress={() => onPress(it.key)}
@@ -47,7 +57,7 @@ const Item = React.memo(function Item({ it, on, onPress }: { it: TabItem; on: bo
       scaleTo={0.92}
       style={{ flex: 1, height: 58, alignItems: 'center', justifyContent: 'center', gap: 3 }}
     >
-      <Feather name={it.icon} size={23} color={color} strokeWidth={on ? 2.3 : 1.8} />
+      <Animated.View style={pop}><Feather name={it.icon} size={23} color={color} strokeWidth={on ? 2.3 : 1.8} /></Animated.View>
       <Text variant="caption" numberOfLines={1} style={{ fontSize: 11, lineHeight: 13, fontWeight: on ? '700' : '600', color }}>
         {it.label}
       </Text>

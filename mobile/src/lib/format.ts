@@ -48,3 +48,29 @@ export function moneyParts(v: string | number | null | undefined): [string, stri
   if (a >= 1e6) return [num(n / 1e6, 1), 'млн сум'];
   return [num(n, 0), 'сум'];
 }
+
+/**
+ * Короткое имя трубы: «Ø426×7» крупно, остальное (марка стали, ГОСТ, вид
+ * изоляции) — мелкой строкой. Длинное «Труба стальная 426×7 мм
+ * электросварная прямошовная, 09Г2С-15, ГОСТ 10705-80» на телефоне читается
+ * плохо, а размер — то, по чему трубу ищут глазами.
+ */
+export function itemTitle(name: string | null | undefined): { head: string; sub: string; pipe: boolean } {
+  const s = (name ?? '').trim();
+  const m = s.match(/(\d+)\s*[×xх]\s*(\d+(?:[.,]\d+)?)\s*(?:мм|mm)/i) ?? s.match(/(\d+)\s*\/\s*(\d+)\s*(?:мм|mm)/i);
+  if (!m || m.index === undefined) return { head: s, sub: '', pipe: false };
+  const sep = m[0].includes('/') ? '/' : '×';
+  const head = `Ø${m[1]}${sep}${m[2]}`;
+  const before = s
+    .slice(0, m.index)
+    .replace(/^(Труба|Po‘lat quvur|Quvur)\s*/i, '')
+    .replace(/стальная\s*/i, '')
+    .replace(/электросварная|прямошовная|elektr payvandlangan|to‘g‘ri chokli|quvur/gi, '')
+    .replace(/\s+/g, ' ')
+    .replace(/[,\s]+$/, '')
+    .trim();
+  const after = s.slice(m.index + m[0].length).split(',').map((x) => x.trim()).filter(Boolean);
+  // «электросварная прямошовная» — общий случай, не нужен в строке; оставляем марку, ГОСТ и вид изоляции
+  const rest = after.filter((x) => !/электросвар|прямошов|payvand|chokli/i.test(x));
+  return { head, sub: [before, ...rest].filter(Boolean).join(' · '), pipe: true };
+}

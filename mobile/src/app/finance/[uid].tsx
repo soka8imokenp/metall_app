@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import { View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { Badge, Button, Card, Divider, ErrorState, Field, KV, Screen, Section, Skeleton } from '@/ui/components';
+import { Button, ErrorState, Field, Screen, Section, Skeleton } from '@/ui/components';
+import { ActionDock, DOCK_SPACE, DockKey, Readout, SlideConfirm, SpecPlate, StatusLamp, type Spec } from '@/ui/Instrument';
+import { Appear } from '@/ui/motion';
 import { Sheet } from '@/ui/Sheet';
 import { Text } from '@/ui/Text';
 import { PhotoStrip } from '@/components/Photos';
@@ -11,7 +13,7 @@ import { useAction } from '@/api/action';
 import { useAuth } from '@/auth/AuthProvider';
 import { useI18n } from '@/i18n';
 import { useTheme } from '@/theme/ThemeProvider';
-import { dateShort, money } from '@/lib/format';
+import { dateShort, moneyParts } from '@/lib/format';
 import { FIN_STATUS, FIN_TYPE } from '@/lib/status';
 
 export default function OperationDetail() {
@@ -30,53 +32,79 @@ export default function OperationDetail() {
   const [sk, stone] = o ? FIN_STATUS[o.status] ?? ['fnStDraft', 'neutral'] : ['fnStDraft', 'neutral'];
 
   const call = async (action: 'submit' | 'approve' | 'reject' | 'post', c?: string) => {
-    const r = await act.run('POST', `/finance/operations/${uid}/${action}`, { version: o.version, comment: c || undefined }, { success: t('prDone2') });
+    const label = action === 'approve' ? t('fnApproved') : action === 'post' ? t('fnPosted') : action === 'submit' ? t('fnSubmitted') : t('prDone2');
+    const r = await act.run('POST', `/finance/operations/${uid}/${action}`, { version: o.version, comment: c || undefined }, { success: label, burst: action !== 'reject' });
     if (r) setReject(false);
   };
 
+  const canSubmit = o?.status === 'draft' && can('finance.post');
+  const canApprove = o?.status === 'pending_approval' && can('finance.approve');
+  const canPost = o?.status === 'approved' && can('finance.post');
+  const [value, scale] = o ? moneyParts(o.amount) : ['', ''];
+  const cur = o?.currency && o.currency !== 'UZS' ? scale.replace('сум', o.currency) : scale;
+
+  const specs: Spec[] = o
+    ? [
+        { label: t('fnAccount'), value: pick(o.account, 'name') },
+        { label: t('fnCounter'), value: pick(o.counterAccount, 'name') },
+        ...(o.cashflowItem ? [{ label: t('fnItem'), value: pick(o.cashflowItem, 'name') }] : []),
+        ...(o.partner ? [{ label: t('fnPartner'), value: pick(o.partner, 'name') }] : []),
+        { label: t('fnPlanned'), value: dateShort(o.plannedDate ?? o.occurredAt) },
+        { label: t('fnAuthor'), value: o.createdBy ?? '—' },
+      ]
+    : [];
+
+  const dock = o && (canSubmit || canApprove || canPost) ? (
+    <ActionDock>
+      {canApprove && <DockKey icon="x" label={t('fnReject')} tone="danger" onPress={() => { act.reset(); setComment(''); setReject(true); }} />}
+      {canSubmit && <SlideConfirm label={t('fnSubmit')} icon="send" busy={act.busy} onConfirm={() => call('submit')} />}
+      {canApprove && <SlideConfirm label={t('fnApprove')} busy={act.busy} onConfirm={() => call('approve')} />}
+      {canPost && <SlideConfirm label={t('fnPost')} icon="check-circle" tone="brand" busy={act.busy} onConfirm={() => call('post')} />}
+    </ActionDock>
+  ) : null;
+
   return (
-    <Screen title={o?.number ?? '…'} back={() => router.back()} onRefresh={() => qc.invalidateQueries({ queryKey: ['api'] })} refreshing={q.isRefetching} padBottom={false} contentStyle={{ paddingBottom: 40 }}>
+    <Screen
+      title={o?.number ?? '…'}
+      back={() => router.back()}
+      onRefresh={() => qc.invalidateQueries({ queryKey: ['api'] })}
+      refreshing={q.isRefetching}
+      padBottom={false}
+      contentStyle={{ paddingBottom: dock ? DOCK_SPACE : 40 }}
+      footer={dock}
+    >
       {q.isLoading ? (
-        <View style={{ padding: 20, gap: 12 }}><Skeleton h={160} r={16} /><Skeleton h={90} r={16} /></View>
+        <View style={{ padding: 20, gap: 12 }}><Skeleton h={120} r={16} /><Skeleton h={140} r={16} /></View>
       ) : q.error ? (
         <ErrorState message={q.error.message} onRetry={() => q.refetch()} />
       ) : o ? (
         <>
-          <Section>
-            <Card style={{ gap: 10 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Badge label={t(sk as any)} tone={stone as any} />
-                <Text variant="caption" tone="secondary">{t(FIN_TYPE[o.type] ?? 'fnExpense')}</Text>
-              </View>
-              <Text variant="largeTitle" num style={{ color: o.type === 'income' ? colors.success : colors.text }}>{money(o.amount, o.currency)}</Text>
-              <Divider />
-              <KV k={t('fnAccount')} v={pick(o.account, 'name')} />
-              <KV k={t('fnCounter')} v={pick(o.counterAccount, 'name')} />
-              {!!o.cashflowItem && <KV k={t('fnItem')} v={pick(o.cashflowItem, 'name')} />}
-              {!!o.partner && <KV k={t('fnPartner')} v={pick(o.partner, 'name')} />}
-              <KV k={t('fnPlanned')} v={dateShort(o.plannedDate ?? o.occurredAt)} />
-              <KV k={t('fnAuthor')} v={o.createdBy ?? '—'} />
-              {!!o.comment && <Text variant="callout" tone="secondary" style={{ marginTop: 6 }}>{o.comment}</Text>}
-            </Card>
-          </Section>
-
-          <Section>
-            <View style={{ gap: 10 }}>
-              {o.status === 'draft' && can('finance.post') && <Button title={t('fnSubmit')} icon="send" needsNetwork loading={act.busy} onPress={() => call('submit')} />}
-              {o.status === 'pending_approval' && can('finance.approve') && (
-                <>
-                  <Button title={t('fnApprove')} icon="check" needsNetwork loading={act.busy} onPress={() => call('approve')} />
-                  <Button title={t('fnReject')} variant="secondary" icon="x" needsNetwork onPress={() => { act.reset(); setComment(''); setReject(true); }} />
-                </>
-              )}
-              {o.status === 'approved' && can('finance.post') && <Button title={t('fnPost')} icon="check-circle" needsNetwork loading={act.busy} onPress={() => call('post')} />}
-              {!!act.error && <Text tone="danger" variant="callout">{act.error}</Text>}
+          {/* показание: статус-лампа и сумма */}
+          <View style={{ paddingHorizontal: 22, marginBottom: 22, gap: 12 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <StatusLamp tone={stone as any} label={t(sk as any)} pulse={o.status === 'pending_approval'} />
+              <Text variant="caption" tone="muted" style={{ letterSpacing: 0.8, textTransform: 'uppercase', fontWeight: '600' }}>{t(FIN_TYPE[o.type] ?? 'fnExpense')}</Text>
             </View>
-          </Section>
+            <Readout value={value} unit={cur} color={o.type === 'income' ? colors.success : undefined} />
+          </View>
 
-          <Section title={t('fnReceipt')}>
-            <PhotoStrip owner="finance_operation" uid={o.uid} canEdit={can('finance.post')} />
-          </Section>
+          <Appear i={1}><Section><SpecPlate items={specs} /></Section></Appear>
+
+          {!!o.comment && (
+            <Appear i={2}>
+              <Section>
+                <View style={{ borderLeftWidth: 3, borderLeftColor: colors.brand, paddingLeft: 14, paddingVertical: 2 }}>
+                  <Text variant="callout" tone="secondary">{o.comment}</Text>
+                </View>
+              </Section>
+            </Appear>
+          )}
+
+          <Appear i={3}>
+            <Section title={t('fnReceipt')}>
+              <PhotoStrip owner="finance_operation" uid={o.uid} canEdit={can('finance.post')} />
+            </Section>
+          </Appear>
 
           <Sheet visible={reject} onClose={() => setReject(false)} title={t('fnReject')}>
             <Field label={t('fnCommentReject')} value={comment} onChangeText={setComment} multiline style={{ height: 90, paddingTop: 12, textAlignVertical: 'top' }} autoFocus />

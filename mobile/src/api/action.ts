@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, newKey } from './client';
 import { useToast } from '@/ui/Toast';
+import { useSuccess } from '@/ui/Success';
 import { useOnline } from '@/lib/network';
 import { useI18n } from '@/i18n';
 
@@ -14,6 +15,7 @@ import { useI18n } from '@/i18n';
 export function useAction() {
   const qc = useQueryClient();
   const toast = useToast();
+  const burst = useSuccess();
   const online = useOnline();
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
@@ -21,7 +23,7 @@ export function useAction() {
   const key = useRef(newKey());
 
   const run = useCallback(
-    async <T = any>(method: 'POST' | 'PATCH' | 'PUT' | 'DELETE', path: string, body?: unknown, opts?: { success?: string; silent?: boolean }): Promise<T | null> => {
+    async <T = any>(method: 'POST' | 'PATCH' | 'PUT' | 'DELETE', path: string, body?: unknown, opts?: { success?: string; silent?: boolean; /** крупное подтверждение (кольцо с галочкой) вместо тоста — для согласований и подписей */ burst?: boolean }): Promise<T | null> => {
       if (!online) {
         toast.show(t('needsNetwork'), 'error');
         return null;
@@ -34,7 +36,7 @@ export function useAction() {
         key.current = newKey();
         await qc.invalidateQueries({ queryKey: ['api'] });
         await qc.invalidateQueries({ queryKey: ['apiFull'] });
-        if (opts?.success) toast.show(opts.success, 'success');
+        if (opts?.success) (opts.burst ? burst.play(opts.success) : toast.show(opts.success, 'success'));
         return r;
       } catch (e) {
         const msg = e instanceof ApiError ? (e.isNetwork ? t('needsNetwork') : e.message) : String(e);
@@ -45,7 +47,7 @@ export function useAction() {
         setBusy(false);
       }
     },
-    [online, qc, toast, t],
+    [online, qc, toast, t, burst],
   );
 
   const reset = useCallback(() => {

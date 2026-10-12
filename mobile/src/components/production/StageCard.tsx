@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import { View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Badge, Button, Card, Field } from '@/ui/components';
+import { Badge, Button, Card, Field, neu } from '@/ui/components';
 import { Feather } from '@/ui/Icon';
 import { useTheme } from '@/theme/ThemeProvider';
 import { Sheet } from '@/ui/Sheet';
@@ -14,7 +15,7 @@ import { useI18n } from '@/i18n';
 import { MARK_LABEL, STAGE_STATUS } from '@/lib/status';
 
 /** Этап заказа и отметки по нему: начать, пауза (с причиной), продолжить, завершить. */
-export function StageCard({ s, orderUid, orderNumber, itemName, orderStatus, onOpenOrder }: { s: any; orderUid: string; orderNumber?: string; itemName?: string; orderStatus?: string; onOpenOrder?: () => void }) {
+export function StageCard({ s, orderUid, orderNumber, itemName, orderStatus, onOpenOrder, rail }: { s: any; orderUid: string; orderNumber?: string; itemName?: string; orderStatus?: string; onOpenOrder?: () => void; /** этап на линии маршрута (в карточке заказа), а не отдельной плиткой */ rail?: { first: boolean; last: boolean } }) {
   const { t, pick } = useI18n();
   const { can } = useAuth();
   const { colors } = useTheme();
@@ -33,20 +34,20 @@ export function StageCard({ s, orderUid, orderNumber, itemName, orderStatus, onO
       'POST',
       `/production/orders/${orderUid}/stages/${s.seq}/mark`,
       { kind, reasonUid, comment: note?.trim() || undefined },
-      { success: t('prDone2') },
+      { success: kind === 'finish' ? t('prStageFinished') : t('prDone2'), burst: kind === 'finish' },
     );
     if (r) { setSheet(null); setComment(''); setReason(null); }
   };
 
-  return (
-    <Card onPress={onOpenOrder} style={{ gap: 10 }}>
+  const body = (
+    <>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
         <View style={{ flex: 1, gap: 2 }}>
           {!!orderNumber && <Text variant="caption" tone="secondary">{orderNumber}{itemName ? ` · ${itemName}` : ''}</Text>}
-          <Text variant="headline" numberOfLines={2}>{s.seq}. {pick(s, 'name')}</Text>
+          <Text variant="headline" numberOfLines={2}>{rail ? '' : `${s.seq}. `}{pick(s, 'name')}</Text>
           {!!s.workCenterCode && <Text variant="caption" tone="secondary">{pick(s, 'workCenterName')}</Text>}
         </View>
-        <Badge label={t(k)} tone={tone} />
+        {!rail && <Badge label={t(k)} tone={tone} />}
       </View>
       {orderStatus === 'planned' && (
         can('production.manage') ? (
@@ -94,6 +95,55 @@ export function StageCard({ s, orderUid, orderNumber, itemName, orderStatus, onO
           onPress={() => doMark(sheet!, sheet === 'pause' ? reason ?? undefined : undefined, comment)}
         />
       </Sheet>
-    </Card>
+    </>
+  );
+
+  if (!rail) return <Card onPress={onOpenOrder} style={{ gap: 10 }}>{body}</Card>;
+  return (
+    <View style={{ flexDirection: 'row', gap: 14 }}>
+      <View style={{ width: 30, alignItems: 'center' }}>
+        <View style={{ width: 2, height: 18, backgroundColor: rail.first ? 'transparent' : s.status === 'done' || s.status === 'running' || s.status === 'paused' ? colors.success : colors.border }} />
+        <StageNode status={s.status} seq={s.seq} />
+        <View style={{ width: 2, flex: 1, backgroundColor: rail.last ? 'transparent' : s.status === 'done' ? colors.success : colors.border }} />
+      </View>
+      <View style={{ flex: 1, paddingBottom: rail.last ? 0 : 14 }}>
+        <Card style={{ gap: 10 }}>{body}</Card>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * Узел маршрута: готово — зелёная галочка, идёт — красное кольцо, которое
+ * вращается как вал станка, пауза — янтарное, впереди — номер в лунке.
+ */
+function StageNode({ status, seq }: { status: string; seq: number }) {
+  const { colors } = useTheme();
+  const spin = useSharedValue(0);
+  useEffect(() => {
+    if (status === 'running') spin.value = withRepeat(withTiming(1, { duration: 2400, easing: Easing.linear }), -1, false);
+    else spin.value = 0;
+  }, [status, spin]);
+  const a = useAnimatedStyle(() => ({ transform: [{ rotate: `${spin.value * 360}deg` }] }));
+  if (status === 'done') {
+    return (
+      <View style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: colors.success, alignItems: 'center', justifyContent: 'center' }}>
+        <Feather name="check" size={16} color="#fff" strokeWidth={3} />
+      </View>
+    );
+  }
+  if (status === 'running' || status === 'paused') {
+    const c = status === 'running' ? colors.brand : colors.warning;
+    return (
+      <View style={[{ width: 30, height: 30, borderRadius: 15, backgroundColor: colors.card, alignItems: 'center', justifyContent: 'center' }, neu(colors, 'insetSm')]}>
+        <Animated.View style={[{ position: 'absolute', width: 24, height: 24, borderRadius: 12, borderWidth: 2.5, borderColor: c, borderTopColor: 'transparent' }, a]} />
+        <Feather name={status === 'running' ? 'play' : 'pause'} size={11} color={c} strokeWidth={2.6} />
+      </View>
+    );
+  }
+  return (
+    <View style={[{ width: 30, height: 30, borderRadius: 15, backgroundColor: colors.card, alignItems: 'center', justifyContent: 'center' }, neu(colors, 'insetSm')]}>
+      <Text variant="caption" num style={{ fontWeight: '700', color: colors.textMuted }}>{seq}</Text>
+    </View>
   );
 }

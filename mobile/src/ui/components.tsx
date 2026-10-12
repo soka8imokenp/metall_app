@@ -181,10 +181,12 @@ export function BigTitle({ title, subtitle }: { title?: string; subtitle?: strin
  * только лист — одно движение на весь экран, без анимации каждой карточки.
  */
 export function Screen({
-  title, subtitle, right, children, onRefresh, refreshing, back, padBottom = true, contentStyle, metrics, wordmark,
+  title, subtitle, right, children, onRefresh, refreshing, back, padBottom = true, contentStyle, metrics, wordmark, footer,
 }: {
   title?: string; subtitle?: string; right?: React.ReactNode; children: React.ReactNode; onRefresh?: () => void; refreshing?: boolean;
   scroll?: boolean; back?: () => void; padBottom?: boolean; contentStyle?: StyleProp<ViewStyle>; metrics?: Metric[]; wordmark?: boolean;
+  /** Неподвижный низ экрана поверх содержимого — док действий. */
+  footer?: React.ReactNode;
 }) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -204,6 +206,7 @@ export function Screen({
           {children}
         </ScrollView>
       </ContentSheet>
+      {footer}
     </View>
   );
 }

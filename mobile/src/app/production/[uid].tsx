@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import { View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { Badge, Button, Card, Divider, KV, Screen, Section, Skeleton, ErrorState, Field, Segmented } from '@/ui/components';
+import { Badge, Button, Card, Screen, Section, Skeleton, ErrorState, Field, Segmented } from '@/ui/components';
+import { ActionDock, DOCK_SPACE, DockKey, DockMain, GaugeBar, Readout, SpecPlate, StatusLamp } from '@/ui/Instrument';
+import { Appear } from '@/ui/motion';
 import { Sheet } from '@/ui/Sheet';
 import { PickerField } from '@/ui/Picker';
 import { Text } from '@/ui/Text';
@@ -13,7 +15,7 @@ import { useAction } from '@/api/action';
 import { useAuth } from '@/auth/AuthProvider';
 import { useI18n } from '@/i18n';
 import { useTheme } from '@/theme/ThemeProvider';
-import { dateShort, num, unit } from '@/lib/format';
+import { dateShort, itemTitle, num, unit } from '@/lib/format';
 import { ORDER_STATUS } from '@/lib/status';
 
 export default function OrderDetail() {
@@ -43,7 +45,7 @@ export default function OrderDetail() {
 
   const register = async () => {
     if (!qtyOk) return;
-    const r = await act.run('POST', `/production/orders/${uid}/output`, { kind, qty: qty.trim().replace(',', '.'), reasonUid: reason ?? undefined, comment: note.trim() || undefined }, { success: t('prDone2') });
+    const r = await act.run('POST', `/production/orders/${uid}/output`, { kind, qty: qty.trim().replace(',', '.'), reasonUid: reason ?? undefined, comment: note.trim() || undefined }, { success: t('prOutputDone'), burst: true });
     if (r) { setOut(false); setQty(''); setReason(null); setNote(''); }
   };
   const useMat = async () => {
@@ -52,15 +54,25 @@ export default function OrderDetail() {
     if (r) { setMat(null); setMatQty(''); setNote(''); }
   };
 
+  const dock = o && manage ? (
+    <ActionDock>
+      {o.nextStatuses?.length > 0 && <DockKey icon="chevrons-right" label={t('prStatusShort')} onPress={() => setStatus(true)} />}
+      <DockMain icon="plus-circle" label={t('prRegister')} onPress={() => { act.reset(); setOut(true); }} />
+    </ActionDock>
+  ) : null;
+  const it = o ? itemTitle(pick(o, 'itemName')) : null;
+  const pct = o ? Math.min(1, Number(o.qtyPercent) / 100) : 0;
+
   return (
     <Screen
-      title={o?.number ?? '…'}
-      subtitle={o ? pick(o, 'itemName') : undefined}
+      title={o ? (it?.pipe ? `${o.number} · ${it.head}` : o.number) : '…'}
+      subtitle={o ? (it?.pipe ? it.sub : pick(o, 'itemName')) : undefined}
       back={() => router.back()}
       onRefresh={() => qc.invalidateQueries({ queryKey: ['api'] })}
       refreshing={q.isRefetching}
       padBottom={false}
-      contentStyle={{ paddingBottom: 40 }}
+      contentStyle={{ paddingBottom: dock ? DOCK_SPACE : 40 }}
+      footer={dock}
     >
       {q.isLoading ? (
         <View style={{ padding: 20, gap: 12 }}><Skeleton h={120} r={16} /><Skeleton h={80} r={16} /></View>
@@ -68,36 +80,31 @@ export default function OrderDetail() {
         <ErrorState message={q.error.message} onRetry={() => q.refetch()} />
       ) : o ? (
         <>
-          <Section>
-            <Card style={{ gap: 10 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Badge label={t(sk as any)} tone={stone as any} />
-                <Text variant="caption" tone="secondary">{t('prDue')} {dateShort(o.dueDate)}</Text>
-              </View>
-              <View style={{ height: 8, borderRadius: 4, backgroundColor: colors.muted, overflow: 'hidden' }}>
-                <View style={{ width: `${Math.min(100, Number(o.qtyPercent))}%`, height: 8, backgroundColor: colors.accent }} />
-              </View>
-              <KV k={t('prProgress')} v={`${num(o.qtyProduced, 2)} / ${num(o.qtyPlanned, 2)} ${unit(o.unit)}`} strong />
-              <KV k={t('prDefect')} v={`${num(o.qtyDefect, 2)} ${unit(o.unit)}`} />
-              <KV k={t('prWaste')} v={`${num(o.qtyWaste, 2)} ${unit(o.unit)}`} />
-              <Divider />
-              <KV k={t('prResponsible')} v={o.responsibleName ?? '—'} />
-            </Card>
-          </Section>
+          <View style={{ paddingHorizontal: 22, marginBottom: 24, gap: 12 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <StatusLamp tone={stone as any} label={t(sk as any)} pulse={o.status === 'paused' || o.status === 'in_progress'} />
+              <Text variant="caption" tone="muted" num style={{ fontWeight: '600' }}>{t('prDue')} {dateShort(o.dueDate)}</Text>
+            </View>
+            <Readout value={num(o.qtyProduced, 2)} unit={`/ ${num(o.qtyPlanned, 2)} ${unit(o.unit)}`} />
+            <GaugeBar value={pct} left={`${Math.round(pct * 100)}%`} right={`${t('prPlan')} ${num(o.qtyPlanned, 2)} ${unit(o.unit)}`} />
+          </View>
 
-          {manage && (
+          <Appear i={1}>
             <Section>
-              <View style={{ flexDirection: 'row', gap: 10 }}>
-                <Button style={{ flex: 1 }} title={t('prRegister')} icon="plus-circle" needsNetwork onPress={() => { act.reset(); setOut(true); }} />
-                {o.nextStatuses?.length > 0 && <Button variant="secondary" title={t('prChangeStatus')} needsNetwork onPress={() => setStatus(true)} />}
-              </View>
+              <SpecPlate
+                items={[
+                  { label: t('prDefect'), value: `${num(o.qtyDefect, 2)} ${unit(o.unit)}` },
+                  { label: t('prWaste'), value: `${num(o.qtyWaste, 2)} ${unit(o.unit)}` },
+                  { label: t('prResponsible'), value: o.responsibleName ?? '—', wide: true },
+                ]}
+              />
             </Section>
-          )}
+          </Appear>
 
           <Section title={t('prStages')}>
-            <View style={{ gap: 10 }}>
-              {o.stages.map((s: any) => (
-                <StageCard key={s.seq} s={{ ...s, marks: markFor(s) }} orderStatus={o.status} orderUid={o.uid} />
+            <View>
+              {o.stages.map((s: any, i: number) => (
+                <StageCard key={s.seq} s={{ ...s, marks: markFor(s) }} orderStatus={o.status} orderUid={o.uid} rail={{ first: i === 0, last: i === o.stages.length - 1 }} />
               ))}
             </View>
           </Section>

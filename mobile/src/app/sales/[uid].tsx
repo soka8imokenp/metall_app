@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import { View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { Badge, Button, Card, Divider, ErrorState, Field, KV, Screen, Section, Skeleton } from '@/ui/components';
+import { Badge, Button, Card, ErrorState, Field, Screen, Section, Skeleton } from '@/ui/components';
+import { ActionDock, DOCK_SPACE, DockKey, DockMain, GaugeBar, Readout, SpecPlate, StatusLamp } from '@/ui/Instrument';
+import { Appear } from '@/ui/motion';
 import { Sheet } from '@/ui/Sheet';
 import { PickerField } from '@/ui/Picker';
 import { Text } from '@/ui/Text';
@@ -12,7 +14,7 @@ import { useAction } from '@/api/action';
 import { useAuth } from '@/auth/AuthProvider';
 import { useI18n } from '@/i18n';
 import { useTheme } from '@/theme/ThemeProvider';
-import { dateShort, money, num, unit } from '@/lib/format';
+import { dateShort, itemTitle, money, moneyParts, num, unit } from '@/lib/format';
 import { NEXT_SALES, PAY_TONE, SALES_STATUS_TONE } from '@/lib/status';
 
 export default function OrderDetail() {
@@ -54,7 +56,7 @@ export default function OrderDetail() {
       lineUid: l.lineUid,
       qty: String(Math.min(Number(l.remainingQty), Number(l.availableQty))),
     }));
-    const r = await act.run('POST', `/sales/orders/${uid}/shipments`, { vehicle: vehicle || undefined, driver: driver || undefined, lines }, { success: t('slShipped') });
+    const r = await act.run('POST', `/sales/orders/${uid}/shipments`, { vehicle: vehicle || undefined, driver: driver || undefined, lines }, { success: t('slShipped'), burst: true });
     if (r) setShipOpen(false);
   };
   const doPay = async () => {
@@ -62,46 +64,63 @@ export default function OrderDetail() {
     const recv = (finRefs.data?.accounts ?? []).find((a: any) => a.kind === 'receivable' && a.currency === 'UZS');
     if (!acc || !recv) return;
     const body = { companyUid: o.enterpriseUid, operationType: 'income', accountCode: acc.code, counterAccountCode: recv.code, amount: payAmount.trim().replace(',', '.'), currencyCode: 'UZS', salesOrderUid: o.uid, comment: `Оплата по заказу ${o.number}` };
-    const r = await act.run('POST', '/finance/operations', body, { success: t('slPaid2') });
+    const r = await act.run('POST', '/finance/operations', body, { success: t('slPaid2'), burst: true });
     if (r) setPayOpen(false);
   };
 
+  const canPay = can('finance.post') && rest > 0 && o?.status !== 'cancelled';
+  const openPay = () => { act.reset(); setPayAmount(String(Math.round(rest))); setPayOpen(true); };
+  const dock = o && edit && (canShip || canPay || nexts.length > 0) ? (
+    <ActionDock>
+      {nexts.length > 0 && <DockKey icon="chevrons-right" label={t('slStatusShort')} onPress={() => { act.reset(); setStatusOpen(true); }} />}
+      {canShip && canPay && <DockKey icon="dollar-sign" label={t('slPayShort')} onPress={openPay} />}
+      {canShip ? (
+        <DockMain icon="truck" label={t('slShip')} onPress={() => { act.reset(); setShipOpen(true); }} />
+      ) : canPay ? (
+        <DockMain icon="dollar-sign" label={t('slReceivePay')} onPress={openPay} />
+      ) : <View style={{ flex: 1 }} />}
+    </ActionDock>
+  ) : null;
+  const paid = o ? Math.min(1, Number(o.paidAmount) / Math.max(1, Number(o.amountTotal))) : 0;
+
   return (
-    <Screen title={o?.number ?? '…'} subtitle={o ? pick(o.partner, 'name') : undefined} back={() => router.back()} onRefresh={() => qc.invalidateQueries({ queryKey: ['api'] })} refreshing={q.isRefetching} padBottom={false} contentStyle={{ paddingBottom: 40 }}>
+    <Screen
+      title={o?.number ?? '…'}
+      subtitle={o ? pick(o.partner, 'name') : undefined}
+      back={() => router.back()}
+      onRefresh={() => qc.invalidateQueries({ queryKey: ['api'] })}
+      refreshing={q.isRefetching}
+      padBottom={false}
+      contentStyle={{ paddingBottom: dock ? DOCK_SPACE : 40 }}
+      footer={dock}
+    >
       {q.isLoading ? (
         <View style={{ padding: 20, gap: 12 }}><Skeleton h={170} r={16} /><Skeleton h={100} r={16} /></View>
       ) : q.error ? (
         <ErrorState message={q.error.message} onRetry={() => q.refetch()} />
       ) : o ? (
         <>
-          <Section>
-            <Card style={{ gap: 8 }}>
-              <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-                <Badge label={t(`slS${o.status}` as any)} tone={SALES_STATUS_TONE[o.status] ?? 'neutral'} />
-                <Badge label={t(`slP${o.paymentStatus}` as any)} tone={PAY_TONE[o.paymentStatus] ?? 'neutral'} />
-              </View>
-              <Text variant="largeTitle" num>{money(o.amountTotal, o.currency)}</Text>
-              <View style={{ height: 6, borderRadius: 3, backgroundColor: colors.muted, overflow: 'hidden' }}>
-                <View style={{ width: `${Math.min(100, (Number(o.paidAmount) / Math.max(1, Number(o.amountTotal))) * 100)}%`, height: 6, backgroundColor: colors.success }} />
-              </View>
-              <KV k={t('slPaid')} v={money(o.paidAmount, o.currency)} />
-              <Divider />
-              <KV k={t('slDelivery')} v={dateShort(o.deliveryDate)} />
-              <KV k={t('slWarehouse')} v={pick(o, 'warehouseName')} />
-              <KV k={t('slManager')} v={o.managerName ?? '—'} />
-              <KV k={t('slDebtLimit')} v={money(o.partner?.debtLimit)} />
-            </Card>
-          </Section>
+          <View style={{ paddingHorizontal: 22, marginBottom: 24, gap: 12 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+              <StatusLamp tone={SALES_STATUS_TONE[o.status] ?? 'neutral'} label={t(`slS${o.status}` as any)} />
+              <StatusLamp tone={PAY_TONE[o.paymentStatus] ?? 'neutral'} label={t(`slP${o.paymentStatus}` as any)} pulse={o.paymentStatus === 'overdue'} />
+            </View>
+            <Readout value={moneyParts(o.amountTotal)[0]} unit={moneyParts(o.amountTotal)[1]} />
+            <GaugeBar value={paid} color={colors.success} left={`${t('slPaid')} ${money(o.paidAmount, o.currency)}`} right={rest > 0 ? `${t('slLeft')} ${money(rest, o.currency)}` : ''} />
+          </View>
 
-          {edit && (
+          <Appear i={1}>
             <Section>
-              <View style={{ gap: 10 }}>
-                {canShip && <Button title={t('slShip')} icon="truck" needsNetwork onPress={() => { act.reset(); setShipOpen(true); }} />}
-                {can('finance.post') && rest > 0 && o.status !== 'cancelled' && <Button title={t('slReceivePay')} icon="dollar-sign" variant="secondary" needsNetwork onPress={() => { act.reset(); setPayAmount(String(Math.round(rest))); setPayOpen(true); }} />}
-                {nexts.length > 0 && <Button title={t('slChangeStatus')} icon="chevrons-right" variant="secondary" needsNetwork onPress={() => { act.reset(); setStatusOpen(true); }} />}
-              </View>
+              <SpecPlate
+                items={[
+                  { label: t('slDelivery'), value: dateShort(o.deliveryDate) },
+                  { label: t('slDebtLimit'), value: money(o.partner?.debtLimit) },
+                  { label: t('slWarehouse'), value: pick(o, 'warehouseName') || '—' },
+                  { label: t('slManager'), value: o.managerName ?? '—' },
+                ]}
+              />
             </Section>
-          )}
+          </Appear>
 
           <Section title={t('dcLines')}>
             <Card padded={false}>
@@ -112,7 +131,15 @@ export default function OrderDetail() {
                   <View key={l.uid}>
                     {i > 0 && <View style={{ height: 1, backgroundColor: colors.border }} />}
                     <View style={{ padding: 14, gap: 4 }}>
-                      <Text variant="callout" style={{ fontWeight: '600' }} numberOfLines={2}>{pick(l, 'itemName')}</Text>
+                      {(() => {
+                        const it = itemTitle(pick(l, 'itemName'));
+                        return it.pipe ? (
+                          <View>
+                            <Text variant="headline" num>{it.head}</Text>
+                            {!!it.sub && <Text variant="caption" tone="muted" numberOfLines={1}>{it.sub}</Text>}
+                          </View>
+                        ) : <Text variant="callout" style={{ fontWeight: '600' }} numberOfLines={2}>{pick(l, 'itemName')}</Text>;
+                      })()}
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                         <Text variant="caption" tone="secondary" num>{num(l.qty, 3)} {unit(l.unit)} × {money(l.price)}</Text>
                         <Text variant="callout" num style={{ fontWeight: '700' }}>{money(l.amountTotal)}</Text>

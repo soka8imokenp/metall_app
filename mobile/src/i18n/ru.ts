@@ -480,6 +480,21 @@ export const ru = {
   pushDenied: 'Уведомления запрещены в настройках телефона — разрешите их там',
   pushOnDone: 'Уведомления включены',
   pushOffDone: 'Уведомления выключены',
+  fnApproved: 'Согласовано',
+  fnPosted: 'Проведено',
+  fnSubmitted: 'Отправлено на согласование',
+  dcDone_submit: 'Отправлено на согласование',
+  dcDone_approve: 'Согласовано',
+  dcDone_sign: 'Подписано',
+  dcDone_return: 'Возвращено',
+  dcDone_cancel: 'Отменено',
+  prOutputDone: 'Выпуск записан',
+  docs: 'Файлы',
+  prStatusShort: 'Статус',
+  prStageFinished: 'Этап завершён',
+  slPayShort: 'Оплата',
+  slStatusShort: 'Статус',
+  slLeft: 'Осталось',
 } as const;
 
 export type Dict = { [K in keyof typeof ru]: string };
