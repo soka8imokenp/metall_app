@@ -14,8 +14,10 @@
     "android": {
       "package": "uz.metallasia.app",
       "adaptiveIcon": {
-        "backgroundColor": "#09090b",
-        "foregroundImage": "./assets/android-icon-foreground.png"
+        "backgroundImage": "./assets/android-icon-background.png",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png",
+        "backgroundColor": "#c81a36"
       },
       "predictiveBackGestureEnabled": false,
       "permissions": [
@@ -68,6 +70,18 @@
           "icon": "./assets/notification-icon.png",
           "color": "#ce1f3c",
           "defaultChannel": "default"
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "backgroundColor": "#e7e9ee",
+          "dark": {
+            "image": "./assets/splash-icon.png",
+            "backgroundColor": "#1b1d22"
+          }
         }
       ]
     ],

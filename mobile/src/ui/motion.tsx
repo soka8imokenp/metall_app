@@ -1,6 +1,6 @@
-import React, { createContext, useContext, useEffect } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 import { StyleProp, ViewStyle } from 'react-native';
-import Animated, { Easing, SharedValue, useAnimatedReaction, useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
+import Animated, { Easing, runOnJS, SharedValue, useAnimatedReaction, useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
 
 /**
  * Движение в духе iOS: без пружин с перелётом, короткие расстояния, долгий
@@ -31,12 +31,19 @@ export function Appear({ i = 0, children, style, distance = 18 }: { i?: number; 
   const tick = useContext(RevealTick);
   const animate = i < MAX_STAGGER;
   const p = useSharedValue(animate ? 0 : 1);
+  // На время появления карточка рисуется в текстуру видеокарты: прозрачность и
+  // сдвиг двигают готовую картинку, а не перерисовывают тени и градиенты в
+  // каждом кадре. После — слой снимается, чтобы не держать память.
+  const [layer, setLayer] = useState(animate);
 
   const run = () => {
     'worklet';
     if (!animate) return;
+    runOnJS(setLayer)(true);
     p.value = 0;
-    p.value = withDelay(i * 45, withTiming(1, { duration: 520, easing: EASE_OUT }));
+    p.value = withDelay(i * 45, withTiming(1, { duration: 520, easing: EASE_OUT }, (done) => {
+      if (done) runOnJS(setLayer)(false);
+    }));
   };
 
   useEffect(() => {
@@ -55,5 +62,5 @@ export function Appear({ i = 0, children, style, distance = 18 }: { i?: number; 
     opacity: p.value,
     transform: [{ translateY: (1 - p.value) * distance }, { scale: 0.965 + p.value * 0.035 }],
   }));
-  return <Animated.View style={[style, a]}>{children}</Animated.View>;
+  return <Animated.View style={[style, a]} renderToHardwareTextureAndroid={layer} shouldRasterizeIOS={layer}>{children}</Animated.View>;
 }

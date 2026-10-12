@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
+import { ActivityIndicator, Platform, StyleProp, StyleSheet, TextInput, View, ViewStyle } from 'react-native';
 import Animated, {
   Easing, interpolate, runOnJS, useAnimatedProps, useAnimatedStyle, useSharedValue, withDelay, withRepeat, withSequence, withTiming,
 } from 'react-native-reanimated';
@@ -38,7 +38,7 @@ export function StatusLamp({ tone, label, pulse }: { tone: Tone; label: string; 
   const c = toneColor(colors, tone);
   const g = useSharedValue(0);
   useEffect(() => {
-    g.value = pulse ? withRepeat(withTiming(1, { duration: 1100, easing: Easing.inOut(Easing.quad) }), -1, true) : 0;
+    g.value = pulse ? withRepeat(withTiming(1, { duration: 1100, easing: Easing.inOut(Easing.quad) }), 6, true) : 0;
   }, [pulse, g]);
   const halo = useAnimatedStyle(() => ({ opacity: 0.18 + g.value * 0.4, transform: [{ scale: 1 + g.value * 0.55 }] }));
   return (
@@ -58,30 +58,53 @@ export function StatusLamp({ tone, label, pulse }: { tone: Tone; label: string; 
  * так глаз сразу ловит главное число экрана. Формат («292,1», «1 250»)
  * сохраняется — меняется только значение.
  */
+const ATextInput = Animated.createAnimatedComponent(TextInput);
+
+/** Формат числа внутри анимации (там нет Intl): «1 250,5» — пробелы разрядов и запятая. */
+function fmt(v: number, frac: number, neg: boolean) {
+  'worklet';
+  const f = Math.pow(10, frac);
+  const r = Math.round(v * f) / f;
+  const int = Math.floor(r);
+  let s = String(int);
+  let out = '';
+  while (s.length > 3) { out = '\u00a0' + s.slice(-3) + out; s = s.slice(0, -3); }
+  out = s + out;
+  if (frac > 0) {
+    const dec = String(Math.round((r - int) * f));
+    out += ',' + '0'.repeat(frac - dec.length) + dec;
+  }
+  return (neg ? '-' : '') + out;
+}
+
 export function CountText({ value, style, duration = 750 }: { value: string; style?: any; duration?: number }) {
-  const m = value.match(/^(-?)([\d\s ]+)(?:,(\d+))?$/);
-  const target = m ? Number(m[2].replace(/[\s ]/g, '')) + (m[3] ? Number(`0.${m[3]}`) : 0) : NaN;
+  const m = value.match(/^(-?)([\d\s\u00a0]+)(?:,(\d+))?$/);
+  const target = m ? Number(m[2].replace(/[\s\u00a0]/g, '')) + (m[3] ? Number(`0.${m[3]}`) : 0) : NaN;
   const frac = m?.[3]?.length ?? 0;
-  const [shown, setShown] = useState(Number.isFinite(target) ? 0 : NaN);
-  const done = useRef(false);
+  const neg = !!m?.[1];
+  const p = useSharedValue(0);
+  const ran = useRef(false);
   useEffect(() => {
     if (!Number.isFinite(target)) return;
-    if (done.current) { setShown(target); return; }
-    let raf = 0;
-    const t0 = Date.now();
-    const step = () => {
-      const p = Math.min(1, (Date.now() - t0) / duration);
-      const e = 1 - Math.pow(1 - p, 4);
-      setShown(target * e);
-      if (p < 1) raf = requestAnimationFrame(step);
-      else done.current = true;
-    };
-    raf = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(raf);
-  }, [target, duration]);
-  if (!Number.isFinite(target)) return <Text style={style}>{value}</Text>;
-  const txt = (m![1] ? '-' : '') + new Intl.NumberFormat('ru-RU', { minimumFractionDigits: frac, maximumFractionDigits: frac }).format(shown).replace(/ /g, ' ');
-  return <Text num style={style}>{txt}</Text>;
+    // докручиваем один раз — при открытии экрана; при обновлении данных цифра просто меняется
+    if (ran.current) { p.value = 1; return; }
+    ran.current = true;
+    p.value = withTiming(1, { duration, easing: Easing.out(Easing.quad) });
+  }, [target, duration, p]);
+  const props = useAnimatedProps(() => ({ text: fmt(target * p.value, frac, neg), defaultValue: '' }) as any);
+  // веб-сборка (только для просмотра) — без докрутки: там нет нативного обновления текста
+  if (!Number.isFinite(target) || Platform.OS === 'web') return <Text num style={style}>{value}</Text>;
+  const flat = StyleSheet.flatten(style) ?? {};
+  // анимация идёт на потоке интерфейса: текст меняется без перерисовки React
+  return (
+    <ATextInput
+      editable={false}
+      underlineColorAndroid="transparent"
+      animatedProps={props}
+      defaultValue={fmt(0, frac, neg)}
+      style={[{ padding: 0, margin: 0, fontFamily: 'Inter_700Bold', fontVariant: ['tabular-nums'] }, flat, { fontWeight: undefined }]}
+    />
+  );
 }
 
 /** Главное показание экрана: число крупно, разряд и единица — рядом мельче. */
@@ -217,10 +240,8 @@ export function PipeLevel({ level, tone, size = 46, wall = 0.18 }: { level: numb
 }
 
 function PulseDot({ color }: { color: string }) {
-  const g = useSharedValue(0);
-  useEffect(() => { g.value = withRepeat(withTiming(1, { duration: 900 }), -1, true); }, [g]);
-  const a = useAnimatedStyle(() => ({ opacity: 0.5 + g.value * 0.5, transform: [{ scale: 0.8 + g.value * 0.4 }] }));
-  return <Animated.View style={[{ position: 'absolute', width: 8, height: 8, borderRadius: 4, backgroundColor: color }, a]} />;
+  // в списке их могут быть десятки — без анимации, только свечение
+  return <View style={{ position: 'absolute', width: 8, height: 8, borderRadius: 4, backgroundColor: color, boxShadow: `0px 0px 5px ${color}` } as any} />;
 }
 
 /* ---------- Док действий ---------- */
@@ -316,7 +337,8 @@ export function SlideConfirm({ label, onConfirm, busy, tone = 'accent', icon = '
   const fg = tone === 'brand' ? '#fff' : colors.accentFg;
 
   useEffect(() => {
-    hint.value = withRepeat(withSequence(withTiming(1, { duration: 900, easing: Easing.inOut(Easing.quad) }), withTiming(0, { duration: 0 })), -1, false);
+    // три подсказки направления после появления — и тишина: бесконечная анимация держит экран в перерисовке
+    hint.value = withDelay(400, withRepeat(withSequence(withTiming(1, { duration: 900, easing: Easing.inOut(Easing.quad) }), withTiming(0, { duration: 0 })), 3, false));
   }, [hint]);
   useEffect(() => { if (!busy) x.value = withTiming(0, { duration: 380, easing: EASE_OUT }); }, [busy, x]);
 

@@ -36,10 +36,13 @@ export function splitStyle(style: StyleProp<ViewStyle>) {
 export function SteelSurface({ radius = 20, tone = 'plate', children, innerStyle }: { radius?: number; tone?: 'plate' | 'dark'; children?: React.ReactNode; innerStyle?: StyleProp<ViewStyle> }) {
   const { colors } = useTheme();
   const c = steelColors(colors.isDark, tone);
+  // Кромка — рамкой в 1 pt (светлая сверху, темнее снизу), а не вторым
+  // градиентом: на вид то же, а каждая карточка рисуется на слой дешевле.
   return (
     <>
-      <LinearGradient colors={c.edge as any} start={{ x: 0.3, y: 0 }} end={{ x: 0.7, y: 1 }} style={[StyleSheet.absoluteFill, { borderRadius: radius }]} />
-      <LinearGradient colors={c.face as any} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={[StyleSheet.absoluteFill, { margin: 1, borderRadius: radius - 1 }]} />
+      <View style={[StyleSheet.absoluteFill, { borderRadius: radius, overflow: 'hidden', borderWidth: 1, borderTopColor: c.edge[0], borderLeftColor: c.edge[0], borderRightColor: c.edge[1], borderBottomColor: c.edge[1] }]}>
+        <LinearGradient colors={c.face as any} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={StyleSheet.absoluteFill} />
+      </View>
       <View style={[{ borderRadius: radius }, innerStyle]}>{children}</View>
     </>
   );
