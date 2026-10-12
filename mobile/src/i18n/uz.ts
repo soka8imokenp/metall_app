@@ -364,4 +364,10 @@ export const uz: Dict = {
   lkNoBio: 'Telefonda barmoq izi yoki Face ID sozlanmagan',
   lkSecurity: 'Xavfsizlik',
   cancel2: 'Bekor qilish',
+
+  settings: 'Sozlamalar',
+  appearance: 'Tashqi ko‘rinish',
+  appSection: 'Ilova',
+  account: 'Hisob',
+  lkChange: 'Kodni o‘zgartirish',
 };

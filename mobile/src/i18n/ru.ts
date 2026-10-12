@@ -367,6 +367,12 @@ export const ru = {
   lkNoBio: 'На телефоне не настроен отпечаток или Face ID',
   lkSecurity: 'Безопасность',
   cancel2: 'Отмена',
+
+  settings: 'Настройки',
+  appearance: 'Внешний вид',
+  appSection: 'Приложение',
+  account: 'Учётная запись',
+  lkChange: 'Сменить код',
 } as const;
 
 export type Dict = { [K in keyof typeof ru]: string };
