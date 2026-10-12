@@ -41,6 +41,8 @@ const C = S / 2;
 const R = 62; // стальная труба
 const L = 2 * Math.PI * R; // длина полосы = окружность трубы
 const N = 72; // точек на полосе
+const PLATE_W = 156;
+const PLATE_H = 72;
 
 /**
  * Заставка — как делают трубу: на чертеже проводятся осевые линии, стальная
@@ -59,7 +61,8 @@ export function Intro() {
   const bend = useSharedValue(0); // полоса сворачивается
   const weld = useSharedValue(0); // сварка шва
   const foam = useSharedValue(0); // ППУ и оболочка
-  const lift = useSharedValue(0); // сечение поднимается, надпись
+  const logo = useSharedValue(0); // сечение превращается в знак
+  const lift = useSharedValue(0); // надпись
   const out = useSharedValue(0); // уход
 
   useEffect(() => {
@@ -70,7 +73,7 @@ export function Intro() {
       const io = (x: number) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
       const q = (d: number, len: number, e: (x: number) => number = outE) => e(Math.max(0, Math.min(1, (at - d) / len)));
       axes.value = q(0, 600); strip.value = q(150, 550); bend.value = q(650, 750, io);
-      weld.value = q(1380, 700, (x) => x); foam.value = q(1550, 700); lift.value = q(2150, 700);
+      weld.value = q(1380, 700, (x) => x); foam.value = q(1550, 700); logo.value = q(2050, 650); lift.value = q(2450, 700);
       return;
     }
     SplashScreen.hideAsync().catch(() => {});
@@ -79,7 +82,8 @@ export function Intro() {
     bend.value = withDelay(650, withTiming(1, { duration: 750, easing: IN_OUT }, (f) => { if (f) runOnJS(tick)('weld'); }));
     weld.value = withDelay(1380, withTiming(1, { duration: 700, easing: Easing.linear }));
     foam.value = withDelay(1550, withTiming(1, { duration: 700, easing: EASE }));
-    lift.value = withDelay(2150, withTiming(1, { duration: 700, easing: EASE }, (f) => { if (f) runOnJS(setPhase)('holding'); }));
+    logo.value = withDelay(2050, withTiming(1, { duration: 650, easing: EASE }, (f) => { if (f) runOnJS(soft)(); }));
+    lift.value = withDelay(2450, withTiming(1, { duration: 700, easing: EASE }, (f) => { if (f) runOnJS(setPhase)('holding'); }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -111,7 +115,7 @@ export function Intro() {
 
   const axisH = useAnimatedProps(() => ({ x1: C - axes.value * C, x2: C + axes.value * C }));
   const axisV = useAnimatedProps(() => ({ y1: C - axes.value * C, y2: C + axes.value * C }));
-  const axesStyle = useAnimatedStyle(() => ({ opacity: interpolate(lift.value, [0, 1], [1, 0.35]) }));
+  const axesStyle = useAnimatedStyle(() => ({ opacity: interpolate(logo.value, [0, 1], [1, 0.3]) }));
 
   // вспышка в точке шва (низ трубы)
   const flash = useAnimatedStyle(() => ({
@@ -123,14 +127,23 @@ export function Intro() {
   const jacketStyle = useAnimatedStyle(() => ({ opacity: interpolate(foam.value, [0.3, 1], [0, 1], 'clamp'), transform: [{ scale: 0.92 + foam.value * 0.08 }] }));
 
   // диаметр готовой трубы — подпись чертежа
-  const diaStyle = useAnimatedStyle(() => ({ opacity: interpolate(foam.value, [0, 0.3, 1], [0, 1, 1]) * interpolate(lift.value, [0, 0.6], [1, 0], 'clamp') }));
+  const diaStyle = useAnimatedStyle(() => ({ opacity: interpolate(foam.value, [0, 0.3, 1], [0, 1, 1]) * interpolate(logo.value, [0, 0.4], [1, 0], 'clamp') }));
 
-  const emblem = useAnimatedStyle(() => ({ transform: [{ translateY: -lift.value * 58 }, { scale: 1 - lift.value * 0.18 }] }));
+  // готовое сечение сжимается в точку знака и уступает ему место
+  const emblem = useAnimatedStyle(() => ({
+    opacity: interpolate(logo.value, [0, 0.55], [1, 0], 'clamp'),
+    transform: [{ translateY: -logo.value * 40 }, { scale: 1 - logo.value * 0.55 }],
+  }));
+  // знак: красная плашка раскрывается из сечения, внутри снизу вырастают горы
+  const plate = useAnimatedStyle(() => ({
+    opacity: interpolate(logo.value, [0.15, 0.55], [0, 1], 'clamp'),
+    transform: [{ translateY: -40 }, { scale: interpolate(logo.value, [0.15, 1], [0.45, 1], 'clamp') }],
+  }));
+  const mountains = useAnimatedStyle(() => ({ height: interpolate(logo.value, [0.45, 1], [0, PLATE_H], 'clamp') }));
   const word = useAnimatedStyle(() => ({ opacity: lift.value, transform: [{ translateY: (1 - lift.value) * 14 }] }));
   const wordMask = useAnimatedStyle(() => ({ width: interpolate(lift.value, [0.1, 0.85], [0, 216], 'clamp') }));
   const sheen = useAnimatedStyle(() => ({ transform: [{ translateX: interpolate(lift.value, [0.35, 1], [-60, 260], 'clamp') }], opacity: interpolate(lift.value, [0.35, 0.6, 1], [0, 1, 0], 'clamp') }));
   const underline = useAnimatedStyle(() => ({ width: interpolate(lift.value, [0.3, 1], [0, 150], 'clamp') }));
-  const caption = useAnimatedStyle(() => ({ opacity: interpolate(lift.value, [0.55, 1], [0, 1], 'clamp') }));
   const root = useAnimatedStyle(() => ({ opacity: 1 - out.value }));
   const content = useAnimatedStyle(() => ({ transform: [{ scale: 1 + out.value * 0.05 }] }));
 
@@ -194,8 +207,19 @@ export function Intro() {
           </Animated.View>
         </Animated.View>
 
+        {/* знак METALL ASIA — остаётся на последнем кадре */}
+        <Animated.View style={[{ position: 'absolute', width: PLATE_W, height: PLATE_H, borderRadius: 16, overflow: 'hidden', boxShadow: '0px 14px 40px rgba(206,31,60,0.45)' } as any, plate]}>
+          <LinearGradient colors={['#de2a47', '#c41a35']} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={StyleSheet.absoluteFill} />
+          <LinearGradient colors={['rgba(255,255,255,0.22)', 'rgba(255,255,255,0)']} style={[StyleSheet.absoluteFill, { height: PLATE_H / 2 }]} />
+          <Animated.View style={[{ position: 'absolute', left: 0, right: 0, bottom: 0, overflow: 'hidden' }, mountains]}>
+            <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: PLATE_H, alignItems: 'center', justifyContent: 'center' }}>
+              <Image source={require('../../assets/brand/metall-asia-glyph.png')} style={{ width: PLATE_W * 0.78, height: PLATE_W * 0.78 * (142 / 406) }} contentFit="contain" />
+            </View>
+          </Animated.View>
+        </Animated.View>
+
         {/* надпись проявляется слева направо, по ней пробегает блик */}
-        <Animated.View style={[{ position: 'absolute', top: '50%', marginTop: 70, alignItems: 'center', gap: 12 }, word]}>
+        <Animated.View style={[{ position: 'absolute', top: '50%', marginTop: 30, alignItems: 'center', gap: 12 }, word]}>
           <Animated.View style={[{ height: 216 * (29 / 343), overflow: 'hidden' }, wordMask]}>
             <Image source={require('../../assets/brand/metall-asia-wordmark-white.png')} style={{ width: 216, height: 216 * (29 / 343) }} contentFit="contain" />
             <Animated.View pointerEvents="none" style={[{ position: 'absolute', top: -6, bottom: -6, width: 46 }, sheen]}>
@@ -203,9 +227,6 @@ export function Intro() {
             </Animated.View>
           </Animated.View>
           <Animated.View style={[{ height: 2, borderRadius: 1, backgroundColor: '#ce1f3c' }, underline]} />
-          <Animated.View style={caption}>
-            <RNText style={{ color: 'rgba(255,255,255,0.5)', fontSize: 10.5, letterSpacing: 3, fontWeight: '600' }}>ТРУБЫ · ППУ-ИЗОЛЯЦИЯ · МЕТАЛЛ</RNText>
-          </Animated.View>
         </Animated.View>
       </Animated.View>
     </Animated.View>
@@ -228,6 +249,10 @@ function Spark({ sp, t }: { sp: (typeof SPARKS)[number]; t: { value: number } })
     };
   });
   return <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: C - sp.len / 2, top: C + R, width: sp.len, height: 2, borderRadius: 1, backgroundColor: '#ffcf7a' }, st]} />;
+}
+
+function soft() {
+  if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Soft).catch(() => {});
 }
 
 function tick(_k: string) {

@@ -3,14 +3,14 @@
     "name": "METALL ASIA",
     "slug": "metall-asia",
     "scheme": "metallasia",
-    "version": "0.9.9",
+    "version": "0.9.10",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "uz.metallasia.app",
-      "buildNumber": "909",
+      "buildNumber": "910",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSAppTransportSecurity": {
@@ -30,7 +30,7 @@
       "permissions": [
         "android.permission.REQUEST_INSTALL_PACKAGES"
       ],
-      "versionCode": 909
+      "versionCode": 910
     },
     "web": {
       "bundler": "metro",
