@@ -470,4 +470,11 @@ export const uz: Dict = {
   admUntil: 'gacha',
   admEndSession: 'Seansni yakunlash',
   admSessionEnded: 'Seans yakunlandi',
+  pushTitle: 'Bildirishnomalar',
+  pushRow: 'Push-bildirishnomalar',
+  pushHint: 'Kelishuvlar, muddati o‘tganlar, qoldiqlar',
+  pushUnavailable: 'Bildirishnoma xizmati ulangandan keyin ishlaydi',
+  pushDenied: 'Telefon sozlamalarida bildirishnomalar taqiqlangan — u yerda ruxsat bering',
+  pushOnDone: 'Bildirishnomalar yoqildi',
+  pushOffDone: 'Bildirishnomalar o‘chirildi',
 };

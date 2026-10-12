@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { Linking } from 'react-native';
 import { View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Card, Screen, Section } from '@/ui/components';
@@ -15,6 +16,7 @@ import { useI18n } from '@/i18n';
 import { useTheme } from '@/theme/ThemeProvider';
 import { APP_VERSION } from '@/lib/updates';
 import { API_BASE } from '@/api/client';
+import { disablePush, enablePush, pushConfigured, pushEnabled } from '@/lib/push';
 
 /** Строка настройки: иконка и подпись слева, управление справа. */
 function Row({ icon, label, hint, right, onPress, last }: { icon: IconName; label: string; hint?: string; right?: React.ReactNode; onPress?: () => void; last?: boolean }) {
@@ -47,6 +49,25 @@ export default function Settings() {
   const toast = useToast();
   const { colors } = useTheme();
   const [pinOpen, setPinOpen] = useState(false);
+  const [push, setPush] = useState(false);
+  useEffect(() => { void pushEnabled().then((on) => setPush(on && pushConfigured)); }, []);
+
+  const togglePush = async (on: boolean) => {
+    if (!pushConfigured) { toast.show(t('pushUnavailable'), 'info'); return; }
+    setPush(on);
+    try {
+      if (!on) { await disablePush(); toast.show(t('pushOffDone'), 'info'); return; }
+      const st = await enablePush();
+      if (st === 'denied') {
+        setPush(false);
+        toast.show(t('pushDenied'), 'error');
+        void Linking.openSettings();
+      } else if (st === 'on') toast.show(t('pushOnDone'), 'success');
+    } catch {
+      setPush(!on);
+      toast.show(t('networkDown'), 'error');
+    }
+  };
 
   return (
     <Screen title={t('settings')} back={() => router.back()} padBottom={false}>
@@ -54,6 +75,12 @@ export default function Settings() {
         <Card padded={false} style={{ paddingHorizontal: 16 }}>
           <Row icon="globe" label={t('language')} right={<LangToggle width={104} height={38} />} />
           <Row icon={colors.isDark ? 'moon' : 'sun'} label={t('theme')} right={<ThemeToggle width={104} height={38} />} last />
+        </Card>
+      </Section>
+
+      <Section title={t('pushTitle')}>
+        <Card padded={false} style={{ paddingHorizontal: 16 }}>
+          <Row icon="bell" label={t('pushRow')} hint={pushConfigured ? t('pushHint') : t('pushUnavailable')} right={<Switch value={push} disabled={!pushConfigured} onChange={togglePush} />} last />
         </Card>
       </Section>
 

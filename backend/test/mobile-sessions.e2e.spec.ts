@@ -313,4 +313,24 @@ describe('push', () => {
     const d = await db.query(`SELECT count(*)::int AS n FROM device WHERE push_token = $1`, [`ExponentPushToken[${stamp}]`]);
     expect(d.rows[0].n).toBe(0);
   });
+
+  it('после выхода из приложения на телефон push не идёт', async () => {
+    const install = `inst-push-out-${randomUUID()}`;
+    const token = `ExponentPushToken[out-${stamp}]`;
+    const r = await mobileLogin(WORKER, install);
+    await api('/api/v1/devices/register', {
+      method: 'POST', token: r.body.data.token, mobile: true,
+      body: JSON.stringify({ installationId: install, platform: 'android', pushToken: token }),
+    });
+    expect((await api('/api/v1/auth/logout', { method: 'POST', token: r.body.data.token, mobile: true })).status).toBe(200);
+    await db.query(
+      `INSERT INTO notification_outbox (user_id, kind, dedupe_key, text_ru, text_uz)
+       VALUES ($1, 'stock_critical', $2, 'После выхода', 'Chiqqandan keyin')`,
+      [worker.id, `test3-${stamp}`],
+    );
+    sent.length = 0;
+    answer = () => ({ ok: true });
+    await push.deliver();
+    expect(sent.filter((m) => m.to === token)).toHaveLength(0);
+  });
 });

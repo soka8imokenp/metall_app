@@ -7,3 +7,7 @@ web-build/
 # Нативные проекты генерирует expo prebuild (CNG), руками их не правят.
 android/
 ios/
+
+# Firebase (push): у каждого стенда свой, в публичный репозиторий не кладём
+google-services.json
+GoogleService-Info.plist

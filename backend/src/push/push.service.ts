@@ -147,6 +147,9 @@ export class PushService {
                          AND d.push_token IS NOT NULL
                          AND d.revoked_at IS NULL
                          AND o.created_at >= d.created_at
+                         -- вышел из приложения на этом телефоне — уведомления туда больше не идут
+                         AND EXISTS (SELECT 1 FROM auth_session s
+                                      WHERE s.device_id = d.id AND s.revoked_at IS NULL AND s.expires_at > now())
            WHERE o.push_sent_at IS NULL
              AND o.push_attempts < ${MAX_ATTEMPTS}
            GROUP BY o.id, u.locale

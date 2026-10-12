@@ -16,6 +16,7 @@ import { ToastProvider } from '@/ui/Toast';
 import { DrawerShell } from '@/ui/Drawer';
 import { UpdateProvider } from '@/ui/UpdatePrompt';
 import { AppLockProvider } from '@/ui/AppLock';
+import { PushBridge } from '@/ui/PushBridge';
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
 
 const queryClient = new QueryClient({
@@ -89,6 +90,7 @@ export default function Root() {
                         <AppLockProvider>
                           <DrawerShell>
                             <Gate />
+                            <PushBridge />
                           </DrawerShell>
                         </AppLockProvider>
                       </UpdateProvider>

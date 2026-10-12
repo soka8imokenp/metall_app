@@ -81,9 +81,11 @@ function Menu({ onNavigate }: { onNavigate: () => void }) {
     ...mods.map((k) => ({ icon: MODULES[k].icon as IconName, label: t(MODULES[k].label), to: `/(tabs)/${k}`, key: k })),
     ...(can('warehouse.view') ? [{ icon: 'maximize' as IconName, label: t('whScan'), to: '/scan', key: 'scan' }] : []),
     ...(can('admin.users') || can('settings.edit') ? [{ icon: 'shield' as IconName, label: t('admin'), to: '/admin', key: 'admin' }] : []),
+    // настройки — таким же пунктом, как остальные: язык, тема, код, отпечаток, уведомления, обновления
+    { icon: 'settings' as IconName, label: t('settings'), to: '/settings', key: 'settings' },
   ];
   const last = segs[segs.length - 1];
-  const current = segs.includes('(tabs)') ? (last === '(tabs)' ? 'index' : last) : '';
+  const current = segs.includes('(tabs)') ? (last === '(tabs)' ? 'index' : last) : segs[0] === 'settings' || segs[0] === 'admin' ? segs[0] : '';
   const lineDark = colors.isDark ? 'rgba(0,0,0,0.45)' : 'rgba(152,160,178,0.32)';
   const lineLight = colors.isDark ? 'rgba(255,255,255,0.035)' : 'rgba(255,255,255,0.85)';
 
@@ -133,21 +135,10 @@ function Menu({ onNavigate }: { onNavigate: () => void }) {
           );
         })}
 
-        {/* настройки — отдельным экраном: язык, тема, код, отпечаток, обновления */}
-        <Pressable
-          onPress={() => go('/settings')}
-          pressedStyle={neu(colors, 'insetSm')}
-          style={[{ marginTop: 26, height: 52, borderRadius: 16, backgroundColor: colors.card, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, gap: 12 }, neu(colors, 'raisedSm')]}
-        >
-          <Feather name="settings" size={19} color={colors.textSecondary} />
-          <Text variant="body" style={{ fontWeight: '600', flex: 1 }}>{t('settings')}</Text>
-          <Feather name="chevron-right" size={18} color={colors.textMuted} />
-        </Pressable>
-
         <Pressable
           onPress={() => { onNavigate(); signOut(); }}
           pressedStyle={neu(colors, 'insetSm')}
-          style={[{ marginTop: 16, height: 50, borderRadius: 16, backgroundColor: colors.card, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 }, neu(colors, 'raisedSm')]}
+          style={[{ marginTop: 26, height: 50, borderRadius: 16, backgroundColor: colors.card, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 }, neu(colors, 'raisedSm')]}
         >
           <Feather name="log-out" size={18} color={colors.brand} />
           <Text variant="body" style={{ fontWeight: '700', color: colors.brand }}>{t('signOut')}</Text>

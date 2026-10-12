@@ -473,6 +473,13 @@ export const ru = {
   admUntil: 'до',
   admEndSession: 'Завершить сессию',
   admSessionEnded: 'Сессия завершена',
+  pushTitle: 'Уведомления',
+  pushRow: 'Push-уведомления',
+  pushHint: 'Согласования, просрочки, остатки',
+  pushUnavailable: 'Будут доступны после подключения службы уведомлений',
+  pushDenied: 'Уведомления запрещены в настройках телефона — разрешите их там',
+  pushOnDone: 'Уведомления включены',
+  pushOffDone: 'Уведомления выключены',
 } as const;
 
 export type Dict = { [K in keyof typeof ru]: string };
