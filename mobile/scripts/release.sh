@@ -42,18 +42,18 @@ node -e '
 echo "→ android-проект"
 EXPO_PUBLIC_API_URL="$API_URL" CI=1 npx expo prebuild --platform android --no-install >/dev/null
 # Сборка в контейнере с ограничением: на ПК 8 ГБ памяти, свободно обычно ~3,5 ГБ.
-sed -i 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx1152m -XX:MaxMetaspaceSize=384m/; s/^reactNativeArchitectures=.*/reactNativeArchitectures=arm64-v8a/; s/^org.gradle.parallel=true/org.gradle.parallel=false/' android/gradle.properties
+sed -i 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx1792m -XX:MaxMetaspaceSize=448m/; s/^reactNativeArchitectures=.*/reactNativeArchitectures=arm64-v8a/; s/^org.gradle.parallel=true/org.gradle.parallel=false/' android/gradle.properties
 grep -q "kotlin.daemon.jvmargs" android/gradle.properties || printf '\nkotlin.daemon.jvmargs=-Xmx1g\norg.gradle.workers.max=2\nkotlin.compiler.execution.strategy=in-process\n' >> android/gradle.properties
 
 echo "→ сборка APK (несколько минут)"
 docker build -q -t metall-apk-builder scripts/android-build >/dev/null
 U="$(id -u):$(id -g)"
 # Ограничения — у самого контейнера (nice перед docker действует только на клиент):
-# 3 ядра из 8, низкий вес по процессору и диску, 2,8 ГБ памяти без подкачки —
+# 3 ядра из 8, низкий вес по процессору и диску, 2,5 ГБ памяти (+2 ГБ подкачки), C++ в один поток —
 # при нехватке упадёт сборка, а не зависнет компьютер. Metro — в 2 потока.
-docker run --rm --cpus 3 --cpu-shares 256 --blkio-weight 100 --memory 2500m --memory-swap 2500m \
-  -v "$HERE":/app -v metall-gradle-cache:/root/.gradle \
-  -e EXPO_PUBLIC_API_URL="$API_URL" -e NODE_ENV=production -e CMAKE_BUILD_PARALLEL_LEVEL=2 -e METRO_MAX_WORKERS=2 \
+docker run --rm --cpus 3 --cpu-shares 256 --blkio-weight 100 --memory 2500m --memory-swap 4500m \
+  -v "$HERE":/app -v metall-gradle-cache:/root/.gradle -v metall-android-ndk:/opt/android-sdk-linux/ndk -v metall-android-cmake:/opt/android-sdk-linux/cmake \
+  -e EXPO_PUBLIC_API_URL="$API_URL" -e NODE_ENV=production -e CMAKE_BUILD_PARALLEL_LEVEL=1 -e METRO_MAX_WORKERS=2 \
   -w /app/android metall-apk-builder \
   bash -c "./gradlew assembleRelease --no-daemon --max-workers=2 -x lint -x test -q; rc=\$?; chown -R $U /app/android; exit \$rc"
 
